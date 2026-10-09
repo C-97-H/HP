@@ -8,6 +8,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Vue 3 核心 -->
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <!-- 权威汉字笔画书写动画引擎 HanziWriter -->
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
   <!-- html2canvas: 导出高清图片 -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <!-- ExcelJS & FileSaver: 支持颜色、边框、合并单元格及图片精确定位 -->
@@ -31,516 +33,639 @@
       overflow: hidden;
     }
     input, button, select, textarea { touch-action: manipulation; }
+
+    /* ================= 开屏专业书写动画样式 ================= */
+    .splash-container {
+      transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.6s, transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .splash-container.splash-fade-out {
+      opacity: 0;
+      visibility: hidden;
+      transform: scale(1.03);
+      pointer-events: none;
+    }
+
+    /* 汉字书法米字格容器 */
+    .hanzi-cell {
+      width: 76px;
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1.5px solid rgba(245, 158, 11, 0.3);
+      border-radius: 14px;
+      box-shadow: 0 0 25px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(245, 158, 11, 0.06);
+      transition: all 0.35s ease;
+      position: relative;
+    }
+    @media (min-width: 640px) {
+      .hanzi-cell {
+        width: 125px;
+        height: 125px;
+        border-radius: 18px;
+      }
+    }
+    /* 米字格微光底线 */
+    .hanzi-cell::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: 
+        linear-gradient(to right, transparent 49.5%, rgba(245, 158, 11, 0.08) 50%, transparent 50.5%),
+        linear-gradient(to bottom, transparent 49.5%, rgba(245, 158, 11, 0.08) 50%, transparent 50.5%);
+      pointer-events: none;
+      border-radius: inherit;
+    }
+    .hanzi-cell.active {
+      border-color: rgba(251, 191, 36, 0.9);
+      box-shadow: 0 0 35px rgba(245, 158, 11, 0.5), inset 0 0 20px rgba(245, 158, 11, 0.2);
+      transform: translateY(-2px) scale(1.02);
+    }
+    .hanzi-cell.completed {
+      border-color: rgba(245, 158, 11, 0.55);
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+    }
+
+    /* 优雅降级文字 */
+    .fallback-char {
+      font-family: "STKaiti", "KaiTi", "SimSun", "Songti SC", serif;
+      font-size: 2.6rem;
+      font-weight: 900;
+      color: #fbbf24;
+      text-shadow: 0 0 20px rgba(245, 158, 11, 0.7);
+      user-select: none;
+    }
+    @media (min-width: 640px) {
+      .fallback-char {
+        font-size: 4.6rem;
+      }
+    }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen relative selection:bg-amber-200">
 
-<div id="app" class="max-w-[1600px] mx-auto p-2 sm:p-5">
-  
-  <!-- 顶部主导航与操作栏 -->
-  <header class="mb-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-    <div class="flex flex-wrap justify-between items-center gap-3">
-      <div>
-        <h1 class="text-xl sm:text-2xl font-bold text-slate-800">琥珀设计有限公司开单与出货管理系统</h1>
-        <p class="text-xs text-slate-500 mt-0.5">我就是要暴富，而且是一夜暴富！</p>
-      </div>
+<div id="app" class="relative">
 
-      <!-- 操作按钮群 -->
-      <div class="flex flex-wrap gap-2 items-center">
-        
-        <!-- 【修改模式下顶栏保存按钮】 -->
-        <button v-if="isEditingHistory" @click="saveEditedOrder" 
-                class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow-md ring-2 ring-amber-400 active:scale-95 transition flex items-center gap-1.5">
-          <span>💾</span><span>保存修改 (单号: {{ editingOrderNo }})</span>
-        </button>
+  <!-- ================= 核心：权威汉字笔顺书写开屏界面 (琥珀设计) ================= -->
+  <div class="fixed inset-0 z-[100] splash-container bg-[#07090e] flex flex-col items-center justify-center overflow-hidden"
+       :class="{ 'splash-fade-out': !showSplash }">
+    
+    <!-- 金色极光光晕 -->
+    <div class="absolute w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[140px] pointer-events-none"></div>
 
-        <button v-if="isEditingHistory" @click="exitEditMode" 
-                class="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium transition flex items-center gap-1">
-          <span>✖</span><span>退出修改</span>
-        </button>
+    <!-- 右上角跳过按钮 -->
+    <button @click="dismissSplash" 
+            class="absolute top-6 right-6 text-slate-400 hover:text-amber-300 text-xs px-3.5 py-1.5 rounded-full border border-slate-700 bg-slate-900/70 transition backdrop-blur-sm z-20">
+      跳过 ✕
+    </button>
 
-        <!-- 历史记录 -->
-        <button @click="openHistoryModal" 
-                class="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1.5">
-          <span>📜</span><span>历史单据 ({{ historyList.length }})</span>
-        </button>
-
-        <!-- 完成本单，开下一单 (在非修改模式下使用) -->
-        <button v-if="!isEditingHistory" @click="startNextOrder" 
-                class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
-          <span>➕</span><span>完成并开下一单</span>
-        </button>
-
-        <!-- 一键复制图片发微信 -->
-        <button @click="copyImage" :disabled="copying || loading" 
-                class="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
-          <span>📋</span><span>{{ copying ? '复制中...' : '复制图片' }}</span>
-        </button>
-
-        <button @click="exportImage" :disabled="loading || copying" 
-                class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
-          <span>📸</span><span>{{ loading ? '排版中...' : '下载图片' }}</span>
-        </button>
-
-        <button @click="exportExcel" :disabled="exportingExcel" 
-                class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
-          <span>📊</span><span>{{ exportingExcel ? '生成中...' : '导出 Excel' }}</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 模版切换按钮 -->
-    <div class="mt-4 pt-3 border-t flex flex-wrap gap-2">
-      <button @click="switchTab('sale')" 
-              :class="currentTab === 'sale' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
-        <span>📋</span> 客户订单
-        <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('sale') }}</span>
-      </button>
-
-      <button @click="switchTab('purchase')" 
-              :class="currentTab === 'purchase' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
-        <span>🏭</span> 采购单 
-        <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('purchase') }}</span>
-      </button>
-
-      <button @click="switchTab('packing')" 
-              :class="currentTab === 'packing' ? 'bg-emerald-700 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
-        <span>📦</span> 装箱单 (Packing list)
-        <span class="text-[11px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('packing') }}</span>
-      </button>
-    </div>
-  </header>
-
-  <!-- 栅格主体 -->
-  <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
-
-    <!-- ================= 表单录入区 (左侧) ================= -->
-    <div class="xl:col-span-5 bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
+    <div class="relative z-10 flex flex-col items-center px-4 max-w-4xl w-full">
       
-      <!-- 【核心状态条：历史单据修改模式醒目标识】 -->
-      <div v-if="isEditingHistory" class="mb-4 p-3 bg-amber-50 border-2 border-amber-400 rounded-xl flex flex-wrap justify-between items-center gap-2 text-xs">
-        <div class="flex items-center gap-2 text-amber-950 font-medium">
-          <span class="text-base animate-pulse">✏️</span>
-          <div>
-            <div>当前处于<b>【历史单据修改模式】</b>：单号 <b>{{ editingOrderNo }}</b></div>
-            <div v-if="lastSavedTime" class="text-[11px] text-emerald-700 mt-0.5">✓ 已于 {{ lastSavedTime }} 成功保存修改</div>
-          </div>
+      <!-- 顶部英文与年份 -->
+      <div class="text-[11px] uppercase tracking-[0.35em] text-amber-400/80 font-mono mb-6">
+        GUANGZHOU AMBER DESIGN · 2026
+      </div>
+
+      <!-- 4个汉字严格按真实笔顺逐笔书写容器 -->
+      <div class="flex items-center justify-center gap-3 sm:gap-6 my-2">
+        <div id="hz-char-0" class="hanzi-cell"><span class="fallback-char">琥</span></div>
+        <div id="hz-char-1" class="hanzi-cell"><span class="fallback-char">珀</span></div>
+        <div id="hz-char-2" class="hanzi-cell"><span class="fallback-char">设</span></div>
+        <div id="hz-char-3" class="hanzi-cell"><span class="fallback-char">计</span></div>
+      </div>
+
+      <!-- 底部优雅标语 -->
+      <div class="mt-8 text-center">
+        <h2 class="text-base sm:text-lg text-amber-200 font-bold tracking-widest">
+          广州琥珀设计有限公司
+        </h2>
+        <p class="text-xs text-slate-400 tracking-wider mt-1.5 flex items-center justify-center gap-2">
+          <span>智能单据与出货管理平台</span>
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+          <span class="text-amber-300 font-medium">系统启动中</span>
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= 主系统界面 ================= -->
+  <div class="max-w-[1600px] mx-auto p-2 sm:p-5">
+    
+    <!-- 顶部主导航与操作栏 -->
+    <header class="mb-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+      <div class="flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold text-slate-800">广州琥珀设计有限公司开单与出货管理系统</h1>
+          <p class="text-xs text-slate-500 mt-0.5">我就是要暴富，而且是一夜暴富！</p>
         </div>
-        <div class="flex items-center gap-2">
-          <button @click="saveEditedOrder" 
-                  class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow transition active:scale-95 flex items-center gap-1">
-            <span>💾</span><span>保存修改</span>
+
+        <!-- 操作按钮群 -->
+        <div class="flex flex-wrap gap-2 items-center">
+          
+          <!-- 【修改模式下顶栏保存按钮】 -->
+          <button v-if="isEditingHistory" @click="saveEditedOrder" 
+                  class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow-md ring-2 ring-amber-400 active:scale-95 transition flex items-center gap-1.5">
+            <span>💾</span><span>保存修改 (单号: {{ editingOrderNo }})</span>
           </button>
-          <button @click="exitEditMode" 
-                  class="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-lg font-medium transition">
-            退出修改
+
+          <button v-if="isEditingHistory" @click="exitEditMode" 
+                  class="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium transition flex items-center gap-1">
+            <span>✖</span><span>退出修改</span>
+          </button>
+
+          <!-- 历史记录 -->
+          <button @click="openHistoryModal" 
+                  class="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1.5">
+            <span>📜</span><span>历史单据 ({{ historyList.length }})</span>
+          </button>
+
+          <!-- 完成本单，开下一单 (在非修改模式下使用) -->
+          <button v-if="!isEditingHistory" @click="startNextOrder" 
+                  class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
+            <span>➕</span><span>完成并开下一单</span>
+          </button>
+
+          <!-- 一键复制图片发微信 -->
+          <button @click="copyImage" :disabled="copying || loading" 
+                  class="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
+            <span>📋</span><span>{{ copying ? '复制中...' : '复制图片' }}</span>
+          </button>
+
+          <button @click="exportImage" :disabled="loading || copying" 
+                  class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
+            <span>📸</span><span>{{ loading ? '排版中...' : '下载图片' }}</span>
+          </button>
+
+          <button @click="exportExcel" :disabled="exportingExcel" 
+                  class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
+            <span>📊</span><span>{{ exportingExcel ? '生成中...' : '导出 Excel' }}</span>
           </button>
         </div>
       </div>
 
-      <!-- 1 & 2. 销售订单 / 采购单表单 -->
-      <div v-if="currentTab === 'sale' || currentTab === 'purchase'">
-        <div class="flex justify-between items-center mb-3 pb-2 border-b">
-          <h2 class="text-base font-bold text-slate-700">
-            {{ currentTab === 'sale' ? '销售订单信息填写' : '采购单基础信息填写' }}
-          </h2>
-          <span class="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
-            {{ currentTab === 'sale' ? '单号独立 · 绿条默认留空' : '单号独立 · 绿条默认雄达皮具' }}
-          </span>
+      <!-- 模版切换按钮 -->
+      <div class="mt-4 pt-3 border-t flex flex-wrap gap-2">
+        <button @click="switchTab('sale')" 
+                :class="currentTab === 'sale' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+          <span>📋</span> 客户订单
+          <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('sale') }}</span>
+        </button>
+
+        <button @click="switchTab('purchase')" 
+                :class="currentTab === 'purchase' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+          <span>🏭</span> 采购单 
+          <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('purchase') }}</span>
+        </button>
+
+        <button @click="switchTab('packing')" 
+                :class="currentTab === 'packing' ? 'bg-emerald-700 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+          <span>📦</span> 装箱单 (Packing list)
+          <span class="text-[11px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('packing') }}</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 栅格主体 -->
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+      <!-- ================= 表单录入区 (左侧) ================= -->
+      <div class="xl:col-span-5 bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
+        
+        <!-- 【历史单据修改模式醒目标识】 -->
+        <div v-if="isEditingHistory" class="mb-4 p-3 bg-amber-50 border-2 border-amber-400 rounded-xl flex flex-wrap justify-between items-center gap-2 text-xs">
+          <div class="flex items-center gap-2 text-amber-950 font-medium">
+            <span class="text-base animate-pulse">✏️</span>
+            <div>
+              <div>当前处于<b>【历史单据修改模式】</b>：单号 <b>{{ editingOrderNo }}</b></div>
+              <div v-if="lastSavedTime" class="text-[11px] text-emerald-700 mt-0.5">✓ 已于 {{ lastSavedTime }} 成功保存修改</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="saveEditedOrder" 
+                    class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow transition active:scale-95 flex items-center gap-1">
+              <span>💾</span><span>保存修改</span>
+            </button>
+            <button @click="exitEditMode" 
+                    class="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-lg font-medium transition">
+              退出修改
+            </button>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">
-              {{ currentTab === 'sale' ? '客户名称' : '采购方名称' }}
-            </label>
-            <input v-model="activeOrder.customer" type="text" placeholder="输入客户名称" class="w-full border rounded p-2 text-sm outline-none">
+        <!-- 1 & 2. 销售订单 / 采购单表单 -->
+        <div v-if="currentTab === 'sale' || currentTab === 'purchase'">
+          <div class="flex justify-between items-center mb-3 pb-2 border-b">
+            <h2 class="text-base font-bold text-slate-700">
+              {{ currentTab === 'sale' ? '销售订单信息填写' : '采购单基础信息填写' }}
+            </h2>
+            <span class="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
+              {{ currentTab === 'sale' ? '单号独立 · 绿条默认留空' : '单号独立 · 绿条默认雄达皮具' }}
+            </span>
           </div>
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="text-xs font-semibold text-slate-600">单号</label>
-              <button v-if="!isEditingHistory" @click="recalcOrderNo" title="重新核准此分类单号" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
-              <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">
+                {{ currentTab === 'sale' ? '客户名称' : '采购方名称' }}
+              </label>
+              <input v-model="activeOrder.customer" type="text" placeholder="输入客户名称" class="w-full border rounded p-2 text-sm outline-none">
             </div>
-            <input v-model="activeOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold text-slate-800">
-          </div>
-          <div class="sm:col-span-2">
-            <label class="block text-xs font-semibold text-green-700 mb-1">绿条显示厂家/供应商 (采购单默认: 雄达皮具)</label>
-            <input v-model="activeOrder.supplier" type="text" placeholder="居中显示在绿色横条上，留空则为纯绿条" 
-                   class="w-full border border-green-300 rounded p-2 text-sm outline-none bg-green-50">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">订单日期 (DATE)</label>
-            <input v-model="activeOrder.orderDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">交货时间 (日期选择)</label>
-            <input v-model="activeOrder.deliveryDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
-          </div>
-        </div>
-
-        <!-- 商品明细 -->
-        <div class="flex justify-between items-center mb-2 pt-2 border-t">
-          <label class="text-sm font-bold text-slate-700">商品明细项</label>
-          <button @click="addItem" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 font-medium">
-            + 添加一行
-          </button>
-        </div>
-
-        <div class="space-y-4 max-h-[600px] overflow-y-auto pr-1">
-          <div v-for="(item, index) in activeOrder.items" :key="index" class="p-3 bg-slate-50 border rounded-lg relative">
-            <button @click="removeItem(index)" v-if="activeOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
-            <div class="text-xs font-bold text-slate-500 mb-2"># 序号 {{ index + 1 }}</div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
-              <div>
-                <span class="text-xs text-slate-500">商品名称 *</span>
-                <input v-model="item.name" type="text" placeholder="输入商品名称" class="w-full border rounded p-1.5 text-xs mt-0.5">
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="text-xs font-semibold text-slate-600">单号</label>
+                <button v-if="!isEditingHistory" @click="recalcOrderNo" title="重新核准此分类单号" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
+                <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
               </div>
-              <div>
-                <span class="text-xs text-slate-500">数量 (Quantity)</span>
-                <input v-model.number="item.quantity" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
-              <div>
-                <span class="text-xs text-slate-500">单价 (Unit Price)</span>
-                <input v-model.number="item.price" type="number" step="0.01" min="0" placeholder="0.00" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
+              <input v-model="activeOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold text-slate-800">
             </div>
-
-            <div class="grid grid-cols-1 gap-2 mb-2">
-              <div>
-                <span class="text-xs text-red-600 font-semibold">要求（G数，颜色，大小，印刷工艺等）</span>
-                <textarea v-model="item.requirements" rows="2" placeholder="如工艺、克重、颜色要求等" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
-              </div>
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-green-700 mb-1">绿条显示厂家/供应商 (采购单默认: 雄达皮具)</label>
+              <input v-model="activeOrder.supplier" type="text" placeholder="居中显示在绿色横条上，留空则为纯绿条" 
+                     class="w-full border border-green-300 rounded p-2 text-sm outline-none bg-green-50">
             </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-              <div>
-                <span class="text-xs text-slate-500">规格编号 / 定制说明</span>
-                <input v-model="item.customType" type="text" placeholder="如：大货或客户定制" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
-              <div>
-                <span class="text-xs text-slate-500">其它备注 (Other)</span>
-                <input v-model="item.other" type="text" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">订单日期 (DATE)</label>
+              <input v-model="activeOrder.orderDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
             </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">交货时间 (日期选择)</label>
+              <input v-model="activeOrder.deliveryDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
+            </div>
+          </div>
 
-            <!-- 图片上传 -->
-            <div class="flex items-center justify-between pt-2 border-t border-slate-200">
-              <div class="flex items-center space-x-2">
-                <label class="cursor-pointer text-xs bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-50">
-                  <span>{{ item.image ? '更换图片' : '上传图片' }}</span>
-                  <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, index)">
-                </label>
-                <div v-if="item.image" class="flex items-center space-x-1">
-                  <img :src="item.image" class="w-7 h-7 object-contain border bg-white rounded">
-                  <button @click="item.image = ''" class="text-xs text-red-500">删除</button>
+          <!-- 商品明细 -->
+          <div class="flex justify-between items-center mb-2 pt-2 border-t">
+            <label class="text-sm font-bold text-slate-700">商品明细项</label>
+            <button @click="addItem" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 font-medium">
+              + 添加一行
+            </button>
+          </div>
+
+          <div class="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+            <div v-for="(item, index) in activeOrder.items" :key="index" class="p-3 bg-slate-50 border rounded-lg relative">
+              <button @click="removeItem(index)" v-if="activeOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
+              <div class="text-xs font-bold text-slate-500 mb-2"># 序号 {{ index + 1 }}</div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                <div>
+                  <span class="text-xs text-slate-500">商品名称 *</span>
+                  <input v-model="item.name" type="text" placeholder="输入商品名称" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+                <div>
+                  <span class="text-xs text-slate-500">数量 (Quantity)</span>
+                  <input v-model.number="item.quantity" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+                <div>
+                  <span class="text-xs text-slate-500">单价 (Unit Price)</span>
+                  <input v-model.number="item.price" type="number" step="0.01" min="0" placeholder="0.00" class="w-full border rounded p-1.5 text-xs mt-0.5">
                 </div>
               </div>
-              <div class="text-xs text-slate-600 font-medium">
-                金额：<span class="font-bold text-red-600">¥ {{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(2) }}</span>
+
+              <div class="grid grid-cols-1 gap-2 mb-2">
+                <div>
+                  <span class="text-xs text-red-600 font-semibold">要求（G数，颜色，大小，印刷工艺等）</span>
+                  <textarea v-model="item.requirements" rows="2" placeholder="如工艺、克重、颜色要求等" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                <div>
+                  <span class="text-xs text-slate-500">规格编号 / 定制说明</span>
+                  <input v-model="item.customType" type="text" placeholder="如：大货或客户定制" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+                <div>
+                  <span class="text-xs text-slate-500">其它备注 (Other)</span>
+                  <input v-model="item.other" type="text" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+              </div>
+
+              <!-- 图片上传 -->
+              <div class="flex items-center justify-between pt-2 border-t border-slate-200">
+                <div class="flex items-center space-x-2">
+                  <label class="cursor-pointer text-xs bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-50">
+                    <span>{{ item.image ? '更换图片' : '上传图片' }}</span>
+                    <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, index)">
+                  </label>
+                  <div v-if="item.image" class="flex items-center space-x-1">
+                    <img :src="item.image" class="w-7 h-7 object-contain border bg-white rounded">
+                    <button @click="item.image = ''" class="text-xs text-red-500">删除</button>
+                  </div>
+                </div>
+                <div class="text-xs text-slate-600 font-medium">
+                  金额：<span class="font-bold text-red-600">¥ {{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(2) }}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- 3. 装箱单 Packing List 表单 -->
+        <div v-else-if="currentTab === 'packing'">
+          <div class="flex justify-between items-center mb-3 pb-2 border-b">
+            <h2 class="text-base font-bold text-slate-700">装箱单 (Packing list) 录入</h2>
+            <span class="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">装箱单独立单号体系</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="text-xs font-semibold text-slate-600">单号</label>
+                <button v-if="!isEditingHistory" @click="recalcOrderNo" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
+                <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
+              </div>
+              <input v-model="packingOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">顶部日期</label>
+              <input v-model="packingOrder.date" type="date" class="w-full border rounded p-2 text-sm outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">主英文标题</label>
+              <input v-model="packingOrder.titleEn" type="text" class="w-full border rounded p-2 text-sm outline-none">
+            </div>
+            <div class="sm:col-span-3">
+              <label class="block text-xs font-semibold text-slate-600 mb-1">底部送货地址与联系人信息</label>
+              <textarea v-model="packingOrder.deliveryAddress" rows="4" 
+                        class="w-full border rounded p-2 text-xs outline-none font-mono"></textarea>
+            </div>
+          </div>
+
+          <div class="flex justify-between items-center mb-2 pt-2 border-t">
+            <label class="text-sm font-bold text-slate-700">装箱货物明细</label>
+            <button @click="addPackingItem" class="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded hover:bg-emerald-100 font-medium">
+              + 添加装箱明细
+            </button>
+          </div>
+
+          <div class="space-y-4 max-h-[550px] overflow-y-auto pr-1">
+            <div v-for="(pItem, pIdx) in packingOrder.items" :key="pIdx" class="p-3 bg-slate-50 border rounded-lg relative">
+              <button @click="removePackingItem(pIdx)" v-if="packingOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
+              <div class="text-xs font-bold text-slate-500 mb-2"># 货物 {{ pIdx + 1 }}</div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                <div>
+                  <span class="text-xs text-slate-500">品名/型号 ITEMS *</span>
+                  <textarea v-model="pItem.name" rows="2" placeholder="输入品名/型号" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
+                </div>
+                <div>
+                  <div class="flex justify-between items-center">
+                    <span class="text-xs text-slate-500">展示模式</span>
+                    <label class="text-xs text-blue-600 cursor-pointer">
+                      <input type="checkbox" v-model="pItem.isTextMode"> 纯文字(如:备品)
+                    </label>
+                  </div>
+
+                  <div v-if="!pItem.isTextMode" class="mt-2">
+                    <label class="cursor-pointer text-xs bg-white border px-2.5 py-1 rounded hover:bg-slate-50 inline-block">
+                      <span>{{ pItem.image ? '更换图片' : '上传图片' }}</span>
+                      <input type="file" accept="image/*" class="hidden" @change="uploadPackingImage($event, pIdx)">
+                    </label>
+                    <div v-if="pItem.image" class="mt-1 flex items-center space-x-1">
+                      <img :src="pItem.image" class="w-8 h-8 object-contain border bg-white rounded">
+                      <button @click="pItem.image = ''" class="text-xs text-red-500">删除</button>
+                    </div>
+                  </div>
+
+                  <div v-else class="mt-1">
+                    <input v-model="pItem.textDesc" type="text" placeholder="输入说明内容，如：备品" class="w-full border rounded p-1.5 text-xs">
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+                <div>
+                  <span class="text-xs text-slate-500">数量/盒 (QTY/CTN)</span>
+                  <input v-model.number="pItem.qtyPerCtn" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+                <div>
+                  <span class="text-xs text-slate-500">件数 (CTN)</span>
+                  <input v-model.number="pItem.ctnCount" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+                </div>
+                <div>
+                  <span class="text-xs text-slate-500">总数量 (自动乘算)</span>
+                  <div class="w-full bg-slate-200 rounded p-1.5 text-xs mt-0.5 font-bold text-center text-slate-700">
+                    {{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
-      <!-- 3. 装箱单 Packing List 表单 -->
-      <div v-else-if="currentTab === 'packing'">
-        <div class="flex justify-between items-center mb-3 pb-2 border-b">
-          <h2 class="text-base font-bold text-slate-700">装箱单 (Packing list) 录入</h2>
-          <span class="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">装箱单独立单号体系</span>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="text-xs font-semibold text-slate-600">单号</label>
-              <button v-if="!isEditingHistory" @click="recalcOrderNo" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
-              <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
-            </div>
-            <input v-model="packingOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold">
+      <!-- ================= 实时预览区域 (右侧) ================= -->
+      <div class="xl:col-span-7">
+        <div class="sticky top-4">
+          <div class="flex justify-between items-center mb-2 px-1">
+            <span class="text-xs font-semibold text-slate-600 flex items-center gap-1">
+              <span>整页实时预览</span>
+              <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[11px] font-normal cursor-pointer" @click="isZoomModalOpen = true">🔍 点击任意部位放大查看</span>
+            </span>
+            <span class="text-xs text-purple-600 font-medium">支持直接 Ctrl+V 发微信</span>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">顶部日期</label>
-            <input v-model="packingOrder.date" type="date" class="w-full border rounded p-2 text-sm outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">主英文标题</label>
-            <input v-model="packingOrder.titleEn" type="text" class="w-full border rounded p-2 text-sm outline-none">
-          </div>
-          <div class="sm:col-span-3">
-            <label class="block text-xs font-semibold text-slate-600 mb-1">底部送货地址与联系人信息</label>
-            <textarea v-model="packingOrder.deliveryAddress" rows="4" 
-                      class="w-full border rounded p-2 text-xs outline-none font-mono"></textarea>
-          </div>
-        </div>
 
-        <div class="flex justify-between items-center mb-2 pt-2 border-t">
-          <label class="text-sm font-bold text-slate-700">装箱货物明细</label>
-          <button @click="addPackingItem" class="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded hover:bg-emerald-100 font-medium">
-            + 添加装箱明细
-          </button>
-        </div>
+          <div ref="previewWrapper" 
+               @click="isZoomModalOpen = true"
+               title="点击放大单据"
+               class="w-full bg-slate-200/60 p-2 sm:p-4 rounded-xl border border-slate-200 flex justify-center overflow-hidden cursor-zoom-in group hover:border-blue-400 transition">
+            
+            <div :style="{
+                   width: `${(currentTab === 'packing' ? 860 : 940) * scaleFactor}px`,
+                   height: `${targetHeight * scaleFactor}px`,
+                   overflow: 'hidden'
+                 }" class="transition-all duration-150 relative">
 
-        <div class="space-y-4 max-h-[550px] overflow-y-auto pr-1">
-          <div v-for="(pItem, pIdx) in packingOrder.items" :key="pIdx" class="p-3 bg-slate-50 border rounded-lg relative">
-            <button @click="removePackingItem(pIdx)" v-if="packingOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
-            <div class="text-xs font-bold text-slate-500 mb-2"># 货物 {{ pIdx + 1 }}</div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-              <div>
-                <span class="text-xs text-slate-500">品名/型号 ITEMS *</span>
-                <textarea v-model="pItem.name" rows="2" placeholder="输入品名/型号" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
+              <div class="absolute top-2 right-2 z-10 bg-black/60 text-white text-[10px] px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                🔍 点击放大
               </div>
-              <div>
-                <div class="flex justify-between items-center">
-                  <span class="text-xs text-slate-500">展示模式</span>
-                  <label class="text-xs text-blue-600 cursor-pointer">
-                    <input type="checkbox" v-model="pItem.isTextMode"> 纯文字(如:备品)
-                  </label>
-                </div>
 
-                <div v-if="!pItem.isTextMode" class="mt-2">
-                  <label class="cursor-pointer text-xs bg-white border px-2.5 py-1 rounded hover:bg-slate-50 inline-block">
-                    <span>{{ pItem.image ? '更换图片' : '上传图片' }}</span>
-                    <input type="file" accept="image/*" class="hidden" @change="uploadPackingImage($event, pIdx)">
-                  </label>
-                  <div v-if="pItem.image" class="mt-1 flex items-center space-x-1">
-                    <img :src="pItem.image" class="w-8 h-8 object-contain border bg-white rounded">
-                    <button @click="pItem.image = ''" class="text-xs text-red-500">删除</button>
+              <!-- 1 & 2. 销售订单 / 采购单预览 -->
+              <div v-if="currentTab === 'sale' || currentTab === 'purchase'" 
+                   id="invoice-target" 
+                   ref="invoiceTargetRef"
+                   :style="{
+                     transform: `scale(${scaleFactor})`,
+                     transformOrigin: 'top left',
+                     width: '940px'
+                   }"
+                   class="bg-white p-4 font-sans text-black box-border shadow-sm">
+                
+                <div class="flex justify-between items-baseline mb-2 px-1">
+                  <div class="text-2xl font-bold tracking-wider" style="font-family: 'SimSun', 'STSong', serif;">
+                    {{ activeOrder.customer || '' }}{{ currentTab === 'sale' ? '订单' : '采购单' }}
+                  </div>
+                  <div class="text-2xl font-bold tracking-wide" style="font-family: 'SimSun', 'STSong', serif;">
+                    单号：{{ activeOrder.orderNo }}
                   </div>
                 </div>
 
-                <div v-else class="mt-1">
-                  <input v-model="pItem.textDesc" type="text" placeholder="输入说明内容，如：备品" class="w-full border rounded p-1.5 text-xs">
+                <!-- 绿色横条 -->
+                <div class="w-full mb-1 font-bold text-center overflow-hidden" 
+                     :style="{
+                       backgroundColor: '#009944',
+                       height: activeOrder.supplier ? '28px' : '12px',
+                       lineHeight: activeOrder.supplier ? '28px' : '12px',
+                       fontSize: '13px',
+                       color: '#000000'
+                     }">
+                  {{ activeOrder.supplier }}
                 </div>
-              </div>
-            </div>
 
-            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
-              <div>
-                <span class="text-xs text-slate-500">数量/盒 (QTY/CTN)</span>
-                <input v-model.number="pItem.qtyPerCtn" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
-              <div>
-                <span class="text-xs text-slate-500">件数 (CTN)</span>
-                <input v-model.number="pItem.ctnCount" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
-              </div>
-              <div>
-                <span class="text-xs text-slate-500">总数量 (自动乘算)</span>
-                <div class="w-full bg-slate-200 rounded p-1.5 text-xs mt-0.5 font-bold text-center text-slate-700">
-                  {{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+                <table class="sheet-table text-[13px]">
+                  <colgroup>
+                    <col style="width: 45px;"><col style="width: 100px;"><col style="width: 75px;"><col style="width: 65px;">
+                    <col style="width: 70px;"><col style="width: 180px;"><col style="width: 175px;"><col style="width: 110px;"><col style="width: 88px;">
+                  </colgroup>
 
-    </div>
+                  <tr style="height: 38px;">
+                    <td style="background-color: #c0c0c0;"></td>
+                    <td></td>
+                    <td style="background-color: #e0e0e0;">
+                      <div class="font-bold text-[12px]">订单日期</div>
+                      <div class="text-[10px] text-slate-600 mt-0.5">DATE</div>
+                    </td>
+                    <td colspan="3" class="text-center font-bold px-2 text-[13px]">
+                      {{ activeOrder.orderDate }}
+                    </td>
+                    <td style="background-color: #f2f2f2; font-bold text-[13px]">交货时间</td>
+                    <td colspan="2" class="text-center font-bold px-2 text-[13px]">
+                      {{ activeOrder.deliveryDate }}
+                    </td>
+                  </tr>
 
-    <!-- ================= 实时预览区域 (右侧：自适应缩放 + 点击任意处放大) ================= -->
-    <div class="xl:col-span-7">
-      <div class="sticky top-4">
-        <div class="flex justify-between items-center mb-2 px-1">
-          <span class="text-xs font-semibold text-slate-600 flex items-center gap-1">
-            <span>整页实时预览</span>
-            <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[11px] font-normal cursor-pointer" @click="isZoomModalOpen = true">🔍 点击任意部位放大查看</span>
-          </span>
-          <span class="text-xs text-purple-600 font-medium">支持直接 Ctrl+V 发微信</span>
-        </div>
+                  <tr style="background-color: #ffff00; font-weight: bold; height: 68px;">
+                    <td><div>序号</div><div class="text-[10px] font-normal leading-tight mt-1">Serial<br>number</div></td>
+                    <td><div>商品名称</div><div class="text-[10px] font-normal leading-tight mt-1">Product<br>Name</div></td>
+                    <td><div>数量</div><div class="text-[10px] font-normal leading-tight mt-1">Quantity</div></td>
+                    <td><div>单价</div><div class="text-[10px] font-normal leading-tight mt-1">Unit<br>Price</div></td>
+                    <td><div>金额</div><div class="text-[10px] font-normal leading-tight mt-1">Total<br>Price</div></td>
+                    <td><div>图片</div><div class="text-[10px] font-normal leading-tight mt-1">Picture</div></td>
+                    <td style="color: #ff0000;">
+                      <div class="text-[11px] leading-snug">要求（G数，颜色，大小，印刷工艺等）</div>
+                      <div class="text-[10px] leading-tight mt-1">MARK</div>
+                    </td>
+                    <td><div class="text-[12px] leading-snug">大货或客户定制</div></td>
+                    <td><div>其它备注</div><div class="text-[10px] font-normal leading-tight mt-1">Oher</div></td>
+                  </tr>
 
-        <div ref="previewWrapper" 
-             @click="isZoomModalOpen = true"
-             title="点击放大单据"
-             class="w-full bg-slate-200/60 p-2 sm:p-4 rounded-xl border border-slate-200 flex justify-center overflow-hidden cursor-zoom-in group hover:border-blue-400 transition">
-          
-          <div :style="{
-                 width: `${(currentTab === 'packing' ? 860 : 940) * scaleFactor}px`,
-                 height: `${targetHeight * scaleFactor}px`,
-                 overflow: 'hidden'
-               }" class="transition-all duration-150 relative">
+                  <tr v-for="(item, idx) in activeOrder.items" :key="idx" class="h-28">
+                    <td class="font-bold text-sm">{{ idx + 1 }}</td>
+                    <td class="font-bold text-xs p-1">{{ item.name }}</td>
+                    <td class="font-bold text-sm">{{ item.quantity || 0 }}</td>
+                    <td class="text-xs">{{ item.price ? Number(item.price).toFixed(2) : '' }}</td>
+                    <td class="font-bold text-xs">{{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(0) }}</td>
+                    
+                    <td class="p-1 overflow-hidden">
+                      <div class="w-full h-24 flex items-center justify-center overflow-hidden">
+                        <img v-if="item.image" :src="item.image" class="max-h-24 max-w-full object-contain mx-auto block">
+                        <span v-else class="text-slate-300 text-xs">无图片</span>
+                      </div>
+                    </td>
 
-            <div class="absolute top-2 right-2 z-10 bg-black/60 text-white text-[10px] px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition pointer-events-none">
-              🔍 点击放大
-            </div>
+                    <td class="p-2 font-bold text-xs" style="color: #ff0000; word-break: break-all; white-space: pre-wrap;">{{ item.requirements }}</td>
+                    <td class="text-xs p-1 font-bold">{{ item.customType }}</td>
+                    <td class="text-xs p-1">{{ item.other }}</td>
+                  </tr>
 
-            <!-- 1 & 2. 销售订单 / 采购单预览 -->
-            <div v-if="currentTab === 'sale' || currentTab === 'purchase'" 
-                 id="invoice-target" 
-                 ref="invoiceTargetRef"
-                 :style="{
-                   transform: `scale(${scaleFactor})`,
-                   transformOrigin: 'top left',
-                   width: '940px'
-                 }"
-                 class="bg-white p-4 font-sans text-black box-border shadow-sm">
-              
-              <div class="flex justify-between items-baseline mb-2 px-1">
-                <div class="text-2xl font-bold tracking-wider" style="font-family: 'SimSun', 'STSong', serif;">
-                  {{ activeOrder.customer || '' }}{{ currentTab === 'sale' ? '订单' : '采购单' }}
-                </div>
-                <div class="text-2xl font-bold tracking-wide" style="font-family: 'SimSun', 'STSong', serif;">
-                  单号：{{ activeOrder.orderNo }}
-                </div>
+                  <tr style="background-color: #fce4d6; height: 44px; font-weight: bold; color: #ff0000;">
+                    <td colspan="2" class="text-sm tracking-wider">总计TOTAL</td>
+                    <td class="text-base">{{ activeTotalQuantity }}</td>
+                    <td></td>
+                    <td class="text-base">{{ activeTotalAmount }}</td>
+                    <td colspan="4"></td>
+                  </tr>
+                </table>
               </div>
 
-              <!-- 绿色横条 -->
-              <div class="w-full mb-1 font-bold text-center overflow-hidden" 
+              <!-- 3. 装箱单 (Packing list) 预览 -->
+              <div v-else-if="currentTab === 'packing'" 
+                   id="invoice-target" 
+                   ref="invoiceTargetRef"
                    :style="{
-                     backgroundColor: '#009944',
-                     height: activeOrder.supplier ? '28px' : '12px',
-                     lineHeight: activeOrder.supplier ? '28px' : '12px',
-                     fontSize: '13px',
-                     color: '#000000'
-                   }">
-                {{ activeOrder.supplier }}
+                     transform: `scale(${scaleFactor})`,
+                     transformOrigin: 'top left',
+                     width: '860px'
+                   }"
+                   class="bg-white p-4 font-sans text-black box-border shadow-sm">
+                
+                <div class="relative mb-0 border border-black py-3 px-4 flex flex-col items-center justify-center min-h-[76px]" style="background-color: #82ba41;">
+                  <div class="text-center">
+                    <div class="text-xl tracking-wider leading-snug" style="font-family: 'Times New Roman', serif;">{{ packingOrder.titleEn }}</div>
+                    <div class="text-2xl font-bold tracking-widest leading-snug mt-1">{{ packingOrder.titleCn }}</div>
+                  </div>
+                  <div class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium">
+                    {{ packingOrder.date }}
+                  </div>
+                </div>
+
+                <table class="sheet-table text-[13px]" style="border-top: none;">
+                  <colgroup>
+                    <col style="width: 140px;"><col style="width: 100px;"><col style="width: 110px;">
+                    <col style="width: 100px;"><col style="width: 120px;"><col style="width: 120px;">
+                  </colgroup>
+
+                  <tr style="font-weight: bold; height: 48px; background-color: #ffffff;">
+                    <td colspan="2"><div>品名/型号</div><div class="text-[11px] font-normal mt-0.5">ITEMS</div></td>
+                    <td><div>数量/盒</div><div class="text-[11px] font-normal mt-0.5">QTY/CTN</div></td>
+                    <td><div>件数</div><div class="text-[11px] font-normal mt-0.5">CTN</div></td>
+                    <td><div>总数量</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+                    <td><div>总数</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+                  </tr>
+
+                  <tr v-for="(pItem, idx) in packingOrder.items" :key="idx" class="h-24">
+                    <td class="font-bold text-sm p-2 whitespace-pre-wrap leading-snug">{{ pItem.name }}</td>
+                    <td class="p-1 overflow-hidden">
+                      <div v-if="!pItem.isTextMode && pItem.image" class="w-full h-20 flex items-center justify-center overflow-hidden">
+                        <img :src="pItem.image" class="max-h-20 max-w-full object-contain mx-auto block">
+                      </div>
+                      <div v-else-if="pItem.isTextMode" class="font-bold text-base">{{ pItem.textDesc || '备品' }}</div>
+                      <span v-else class="text-slate-300 text-xs">无</span>
+                    </td>
+                    <td class="font-bold text-base">{{ pItem.qtyPerCtn || 0 }}</td>
+                    <td class="font-bold text-base">{{ pItem.ctnCount || 0 }}</td>
+                    <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+                    <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+                  </tr>
+
+                  <tr style="background-color: #ffff00; height: 44px; font-weight: bold;">
+                    <td colspan="3" class="text-base tracking-widest">TOTAL</td>
+                    <td class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalCtn }}</td>
+                    <td colspan="2" class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalQty }}</td>
+                  </tr>
+
+                  <tr>
+                    <td colspan="6" style="border: 1px solid #000; padding: 14px 10px; background-color: #ffffff;" 
+                        class="text-xs leading-relaxed font-medium whitespace-pre-wrap text-slate-900">
+                      {{ packingOrder.deliveryAddress }}
+                    </td>
+                  </tr>
+                </table>
               </div>
 
-              <table class="sheet-table text-[13px]">
-                <colgroup>
-                  <col style="width: 45px;"><col style="width: 100px;"><col style="width: 75px;"><col style="width: 65px;">
-                  <col style="width: 70px;"><col style="width: 180px;"><col style="width: 175px;"><col style="width: 110px;"><col style="width: 88px;">
-                </colgroup>
-
-                <tr style="height: 38px;">
-                  <td style="background-color: #c0c0c0;"></td>
-                  <td></td>
-                  <td style="background-color: #e0e0e0;">
-                    <div class="font-bold text-[12px]">订单日期</div>
-                    <div class="text-[10px] text-slate-600 mt-0.5">DATE</div>
-                  </td>
-                  <td colspan="3" class="text-center font-bold px-2 text-[13px]">
-                    {{ activeOrder.orderDate }}
-                  </td>
-                  <td style="background-color: #f2f2f2; font-bold text-[13px]">交货时间</td>
-                  <td colspan="2" class="text-center font-bold px-2 text-[13px]">
-                    {{ activeOrder.deliveryDate }}
-                  </td>
-                </tr>
-
-                <tr style="background-color: #ffff00; font-weight: bold; height: 68px;">
-                  <td><div>序号</div><div class="text-[10px] font-normal leading-tight mt-1">Serial<br>number</div></td>
-                  <td><div>商品名称</div><div class="text-[10px] font-normal leading-tight mt-1">Product<br>Name</div></td>
-                  <td><div>数量</div><div class="text-[10px] font-normal leading-tight mt-1">Quantity</div></td>
-                  <td><div>单价</div><div class="text-[10px] font-normal leading-tight mt-1">Unit<br>Price</div></td>
-                  <td><div>金额</div><div class="text-[10px] font-normal leading-tight mt-1">Total<br>Price</div></td>
-                  <td><div>图片</div><div class="text-[10px] font-normal leading-tight mt-1">Picture</div></td>
-                  <td style="color: #ff0000;">
-                    <div class="text-[11px] leading-snug">要求（G数，颜色，大小，印刷工艺等）</div>
-                    <div class="text-[10px] leading-tight mt-1">MARK</div>
-                  </td>
-                  <td><div class="text-[12px] leading-snug">大货或客户定制</div></td>
-                  <td><div>其它备注</div><div class="text-[10px] font-normal leading-tight mt-1">Oher</div></td>
-                </tr>
-
-                <tr v-for="(item, idx) in activeOrder.items" :key="idx" class="h-28">
-                  <td class="font-bold text-sm">{{ idx + 1 }}</td>
-                  <td class="font-bold text-xs p-1">{{ item.name }}</td>
-                  <td class="font-bold text-sm">{{ item.quantity || 0 }}</td>
-                  <td class="text-xs">{{ item.price ? Number(item.price).toFixed(2) : '' }}</td>
-                  <td class="font-bold text-xs">{{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(0) }}</td>
-                  
-                  <td class="p-1 overflow-hidden">
-                    <div class="w-full h-24 flex items-center justify-center overflow-hidden">
-                      <img v-if="item.image" :src="item.image" class="max-h-24 max-w-full object-contain mx-auto block">
-                      <span v-else class="text-slate-300 text-xs">无图片</span>
-                    </div>
-                  </td>
-
-                  <td class="p-2 font-bold text-xs" style="color: #ff0000; word-break: break-all; white-space: pre-wrap;">{{ item.requirements }}</td>
-                  <td class="text-xs p-1 font-bold">{{ item.customType }}</td>
-                  <td class="text-xs p-1">{{ item.other }}</td>
-                </tr>
-
-                <tr style="background-color: #fce4d6; height: 44px; font-weight: bold; color: #ff0000;">
-                  <td colspan="2" class="text-sm tracking-wider">总计TOTAL</td>
-                  <td class="text-base">{{ activeTotalQuantity }}</td>
-                  <td></td>
-                  <td class="text-base">{{ activeTotalAmount }}</td>
-                  <td colspan="4"></td>
-                </tr>
-              </table>
-            </div>
-
-            <!-- 3. 装箱单 (Packing list) 预览 -->
-            <div v-else-if="currentTab === 'packing'" 
-                 id="invoice-target" 
-                 ref="invoiceTargetRef"
-                 :style="{
-                   transform: `scale(${scaleFactor})`,
-                   transformOrigin: 'top left',
-                   width: '860px'
-                 }"
-                 class="bg-white p-4 font-sans text-black box-border shadow-sm">
-              
-              <div class="relative mb-0 border border-black py-3 px-4 flex flex-col items-center justify-center min-h-[76px]" style="background-color: #82ba41;">
-                <div class="text-center">
-                  <div class="text-xl tracking-wider leading-snug" style="font-family: 'Times New Roman', serif;">{{ packingOrder.titleEn }}</div>
-                  <div class="text-2xl font-bold tracking-widest leading-snug mt-1">{{ packingOrder.titleCn }}</div>
-                </div>
-                <div class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium">
-                  {{ packingOrder.date }}
-                </div>
-              </div>
-
-              <table class="sheet-table text-[13px]" style="border-top: none;">
-                <colgroup>
-                  <col style="width: 140px;"><col style="width: 100px;"><col style="width: 110px;">
-                  <col style="width: 100px;"><col style="width: 120px;"><col style="width: 120px;">
-                </colgroup>
-
-                <tr style="font-weight: bold; height: 48px; background-color: #ffffff;">
-                  <td colspan="2"><div>品名/型号</div><div class="text-[11px] font-normal mt-0.5">ITEMS</div></td>
-                  <td><div>数量/盒</div><div class="text-[11px] font-normal mt-0.5">QTY/CTN</div></td>
-                  <td><div>件数</div><div class="text-[11px] font-normal mt-0.5">CTN</div></td>
-                  <td><div>总数量</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
-                  <td><div>总数</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
-                </tr>
-
-                <tr v-for="(pItem, idx) in packingOrder.items" :key="idx" class="h-24">
-                  <td class="font-bold text-sm p-2 whitespace-pre-wrap leading-snug">{{ pItem.name }}</td>
-                  <td class="p-1 overflow-hidden">
-                    <div v-if="!pItem.isTextMode && pItem.image" class="w-full h-20 flex items-center justify-center overflow-hidden">
-                      <img :src="pItem.image" class="max-h-20 max-w-full object-contain mx-auto block">
-                    </div>
-                    <div v-else-if="pItem.isTextMode" class="font-bold text-base">{{ pItem.textDesc || '备品' }}</div>
-                    <span v-else class="text-slate-300 text-xs">无</span>
-                  </td>
-                  <td class="font-bold text-base">{{ pItem.qtyPerCtn || 0 }}</td>
-                  <td class="font-bold text-base">{{ pItem.ctnCount || 0 }}</td>
-                  <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
-                  <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
-                </tr>
-
-                <tr style="background-color: #ffff00; height: 44px; font-weight: bold;">
-                  <td colspan="3" class="text-base tracking-widest">TOTAL</td>
-                  <td class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalCtn }}</td>
-                  <td colspan="2" class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalQty }}</td>
-                </tr>
-
-                <tr>
-                  <td colspan="6" style="border: 1px solid #000; padding: 14px 10px; background-color: #ffffff;" 
-                      class="text-xs leading-relaxed font-medium whitespace-pre-wrap text-slate-900">
-                    {{ packingOrder.deliveryAddress }}
-                  </td>
-                </tr>
-              </table>
             </div>
 
           </div>
-
         </div>
       </div>
+
     </div>
+
+    <!-- ================= 页面最底部版权信息 ================= -->
+    <footer class="mt-8 mb-4 border-t border-slate-200/80 pt-5 text-center">
+      <div class="text-xs text-slate-500 font-medium tracking-wider">
+        © 2026 广州琥珀设计有限公司 · 版权所有
+      </div>
+    </footer>
 
   </div>
 
-  <!-- ================= 核心新增：修改保存成功反馈面板 (明确下一步动作) ================= -->
+  <!-- ================= 修改保存成功反馈面板 ================= -->
   <div v-if="showSaveSuccessModal" 
        class="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
     <div class="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-100">
@@ -571,7 +696,7 @@
     </div>
   </div>
 
-  <!-- ================= 放大预览模态框 (点击任意处放大，带X按钮关闭) ================= -->
+  <!-- ================= 放大预览模态框 ================= -->
   <div v-if="isZoomModalOpen" 
        class="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-start p-2 sm:p-6 overflow-auto backdrop-blur-sm"
        @click.self="isZoomModalOpen = false">
@@ -714,7 +839,7 @@
     </div>
   </div>
 
-  <!-- ================= 历史单据管理模态框 (3种分类完全隔离) ================= -->
+  <!-- ================= 历史单据管理模态框 ================= -->
   <div v-if="showHistoryModal" 
        class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-6 backdrop-blur-sm"
        @click.self="showHistoryModal = false">
@@ -753,7 +878,7 @@
         </div>
       </div>
 
-      <!-- 分类选项卡切换 (3种分开) -->
+      <!-- 分类选项卡切换 -->
       <div class="flex border-b bg-slate-100 px-4 pt-2 gap-2">
         <button @click="historyCategory = 'sale'"
                 :class="historyCategory === 'sale' ? 'bg-white text-blue-600 border-t-2 border-blue-600 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-200'"
@@ -808,7 +933,6 @@
               </div>
             </div>
 
-            <!-- 操作动作 -->
             <div class="flex gap-2">
               <button @click="loadHistoryOrder(rec)" 
                       class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium shadow transition">
@@ -836,6 +960,69 @@
 
   createApp({
     setup() {
+      const showSplash = ref(true);
+
+      const dismissSplash = () => {
+        showSplash.value = false;
+        setTimeout(() => {
+          nextTick(updateScale);
+        }, 300);
+      };
+
+      // 核心：启动真正的汉字逐笔书写动画
+      const startHanziWriting = async () => {
+        const chars = ['琥', '珀', '设', '计'];
+        const charIds = ['hz-char-0', 'hz-char-1', 'hz-char-2', 'hz-char-3'];
+        
+        // 自动探测屏幕尺寸
+        const isMobile = window.innerWidth < 640;
+        const charSize = isMobile ? 66 : 110;
+
+        if (typeof HanziWriter !== 'undefined') {
+          try {
+            const writers = [];
+            for (let i = 0; i < chars.length; i++) {
+              const el = document.getElementById(charIds[i]);
+              if (!el) continue;
+              el.innerHTML = ''; // 清空保底字体，由引擎绘制正规笔画
+              const writer = HanziWriter.create(el, chars[i], {
+                width: charSize,
+                height: charSize,
+                padding: 4,
+                showOutline: true,
+                outlineColor: 'rgba(251, 191, 36, 0.15)',
+                strokeColor: '#f59e0b',
+                strokeAnimationSpeed: 2.3, // 速度调优，既能看清笔顺又不会耗时
+                delayBetweenStrokes: 15,
+                showCharacter: false
+              });
+              writers.push({ writer, el });
+            }
+
+            // 顺畅地依次书写：琥 -> 珀 -> 设 -> 计
+            for (let i = 0; i < writers.length; i++) {
+              writers[i].el.classList.add('active');
+              await writers[i].writer.animateCharacter();
+              writers[i].el.classList.remove('active');
+              writers[i].el.classList.add('completed');
+            }
+
+            // 书写完成后短暂停留 0.6 秒揭开主系统界面
+            setTimeout(() => {
+              dismissSplash();
+            }, 600);
+            return;
+          } catch (err) {
+            console.warn('HanziWriter 在线数据加载跳过，已使用书法保底文字', err);
+          }
+        }
+
+        // 离线无网络保底：2.4 秒后平滑揭幕
+        setTimeout(() => {
+          dismissSplash();
+        }, 2400);
+      };
+
       const currentTab = ref('sale');
       const loading = ref(false);
       const copying = ref(false);
@@ -845,7 +1032,6 @@
       const showHistoryModal = ref(false);
       const historyCategory = ref('sale');
 
-      // 【核心修改模式状态管理】
       const isEditingHistory = ref(false);
       const editingOrderNo = ref('');
       const lastSavedTime = ref('');
@@ -900,7 +1086,7 @@
             historyList.value = validRecords;
             if (purgedCount > 0) {
               saveHistoryToStorage();
-              console.log(`[自动维护] 已自动清理 ${purgedCount} 条超过 370 天的超期历史单据`);
+              console.log(`[自动维护] 已自动清理 ${purgedCount} 条超期单据`);
             }
           }
         } catch (e) {
@@ -1014,7 +1200,6 @@
         }
       };
 
-      // 归档当前订单
       const archiveCurrentOrder = () => {
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -1056,14 +1241,12 @@
         lastSavedTime.value = timeStr;
       };
 
-      // 【核心新增：保存修改并触发明确交互面板】
       const saveEditedOrder = () => {
         archiveCurrentOrder();
         lastSavedOrderNo.value = editingOrderNo.value || (currentTab.value === 'packing' ? packingOrder.value.orderNo : activeOrder.value.orderNo);
         showSaveSuccessModal.value = true;
       };
 
-      // 动作1：修改保存后退出并准备开下一单
       const finishEditAndNewOrder = () => {
         showSaveSuccessModal.value = false;
         isEditingHistory.value = false;
@@ -1095,13 +1278,11 @@
         nextTick(updateScale);
       };
 
-      // 动作2：修改保存后立即前往历史列表核对
       const finishEditAndViewHistory = () => {
         showSaveSuccessModal.value = false;
         openHistoryModal();
       };
 
-      // 退出修改模式
       const exitEditMode = () => {
         if (!confirm('确定退出修改模式吗？退出后将切换回新开单状态。')) return;
         isEditingHistory.value = false;
@@ -1133,7 +1314,6 @@
         nextTick(updateScale);
       };
 
-      // 调出历史重做
       const loadHistoryOrder = (rec) => {
         if (!confirm(`确定调出单号【${rec.orderNo}】重新修改吗？当前未保存内容将被覆盖。`)) return;
         currentTab.value = rec.type;
@@ -1715,6 +1895,11 @@
         window.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') isZoomModalOpen.value = false;
         });
+
+        // 页面挂载完毕，启动正版汉字笔顺动画
+        nextTick(() => {
+          startHanziWriting();
+        });
       });
 
       watch([currentTab, activeOrder, packingOrder], () => {
@@ -1722,6 +1907,8 @@
       }, { deep: true });
 
       return {
+        showSplash,
+        dismissSplash,
         currentTab,
         saleOrder,
         purchaseOrder,
@@ -1765,7 +1952,6 @@
         batchExporting,
         batchProgressText,
         batchExportZip,
-        // 修改模式专属返回属性
         isEditingHistory,
         editingOrderNo,
         lastSavedTime,
