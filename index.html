@@ -1,0 +1,1783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>琥珀设计有限公司多功能开单系统</title>
+  <!-- Tailwind CSS 响应式样式库 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 核心 -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <!-- html2canvas: 导出高清图片 -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <!-- ExcelJS & FileSaver: 支持颜色、边框、合并单元格及图片精确定位 -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <!-- JSZip: 批量结构化压缩打包 -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <style>
+    .sheet-table {
+      border-collapse: collapse;
+      width: 100%;
+      table-layout: fixed;
+    }
+    .sheet-table th, .sheet-table td {
+      border: 1px solid #000;
+      vertical-align: middle !important;
+      text-align: center !important;
+      box-sizing: border-box;
+      padding: 6px 3px !important;
+      line-height: 1.3 !important;
+      overflow: hidden;
+    }
+    input, button, select, textarea { touch-action: manipulation; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
+
+<div id="app" class="max-w-[1600px] mx-auto p-2 sm:p-5">
+  
+  <!-- 顶部主导航与操作栏 -->
+  <header class="mb-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+    <div class="flex flex-wrap justify-between items-center gap-3">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold text-slate-800">琥珀设计有限公司开单与出货管理系统</h1>
+        <p class="text-xs text-slate-500 mt-0.5">我就是要暴富，而且是一夜暴富！</p>
+      </div>
+
+      <!-- 操作按钮群 -->
+      <div class="flex flex-wrap gap-2 items-center">
+        
+        <!-- 【修改模式下顶栏保存按钮】 -->
+        <button v-if="isEditingHistory" @click="saveEditedOrder" 
+                class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow-md ring-2 ring-amber-400 active:scale-95 transition flex items-center gap-1.5">
+          <span>💾</span><span>保存修改 (单号: {{ editingOrderNo }})</span>
+        </button>
+
+        <button v-if="isEditingHistory" @click="exitEditMode" 
+                class="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium transition flex items-center gap-1">
+          <span>✖</span><span>退出修改</span>
+        </button>
+
+        <!-- 历史记录 -->
+        <button @click="openHistoryModal" 
+                class="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1.5">
+          <span>📜</span><span>历史单据 ({{ historyList.length }})</span>
+        </button>
+
+        <!-- 完成本单，开下一单 (在非修改模式下使用) -->
+        <button v-if="!isEditingHistory" @click="startNextOrder" 
+                class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
+          <span>➕</span><span>完成并开下一单</span>
+        </button>
+
+        <!-- 一键复制图片发微信 -->
+        <button @click="copyImage" :disabled="copying || loading" 
+                class="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold shadow active:scale-95 transition flex items-center gap-1">
+          <span>📋</span><span>{{ copying ? '复制中...' : '复制图片' }}</span>
+        </button>
+
+        <button @click="exportImage" :disabled="loading || copying" 
+                class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
+          <span>📸</span><span>{{ loading ? '排版中...' : '下载图片' }}</span>
+        </button>
+
+        <button @click="exportExcel" :disabled="exportingExcel" 
+                class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow active:scale-95 transition flex items-center gap-1">
+          <span>📊</span><span>{{ exportingExcel ? '生成中...' : '导出 Excel' }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 模版切换按钮 -->
+    <div class="mt-4 pt-3 border-t flex flex-wrap gap-2">
+      <button @click="switchTab('sale')" 
+              :class="currentTab === 'sale' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+        <span>📋</span> 客户订单
+        <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('sale') }}</span>
+      </button>
+
+      <button @click="switchTab('purchase')" 
+              :class="currentTab === 'purchase' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+        <span>🏭</span> 采购单 
+        <span class="text-[11px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('purchase') }}</span>
+      </button>
+
+      <button @click="switchTab('packing')" 
+              :class="currentTab === 'packing' ? 'bg-emerald-700 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-1.5">
+        <span>📦</span> 装箱单 (Packing list)
+        <span class="text-[11px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded-full">{{ getHistoryCount('packing') }}</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 栅格主体 -->
+  <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+    <!-- ================= 表单录入区 (左侧) ================= -->
+    <div class="xl:col-span-5 bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
+      
+      <!-- 【核心状态条：历史单据修改模式醒目标识】 -->
+      <div v-if="isEditingHistory" class="mb-4 p-3 bg-amber-50 border-2 border-amber-400 rounded-xl flex flex-wrap justify-between items-center gap-2 text-xs">
+        <div class="flex items-center gap-2 text-amber-950 font-medium">
+          <span class="text-base animate-pulse">✏️</span>
+          <div>
+            <div>当前处于<b>【历史单据修改模式】</b>：单号 <b>{{ editingOrderNo }}</b></div>
+            <div v-if="lastSavedTime" class="text-[11px] text-emerald-700 mt-0.5">✓ 已于 {{ lastSavedTime }} 成功保存修改</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="saveEditedOrder" 
+                  class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow transition active:scale-95 flex items-center gap-1">
+            <span>💾</span><span>保存修改</span>
+          </button>
+          <button @click="exitEditMode" 
+                  class="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-lg font-medium transition">
+            退出修改
+          </button>
+        </div>
+      </div>
+
+      <!-- 1 & 2. 销售订单 / 采购单表单 -->
+      <div v-if="currentTab === 'sale' || currentTab === 'purchase'">
+        <div class="flex justify-between items-center mb-3 pb-2 border-b">
+          <h2 class="text-base font-bold text-slate-700">
+            {{ currentTab === 'sale' ? '销售订单信息填写' : '采购单基础信息填写' }}
+          </h2>
+          <span class="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
+            {{ currentTab === 'sale' ? '单号独立 · 绿条默认留空' : '单号独立 · 绿条默认雄达皮具' }}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">
+              {{ currentTab === 'sale' ? '客户名称' : '采购方名称' }}
+            </label>
+            <input v-model="activeOrder.customer" type="text" placeholder="输入客户名称" class="w-full border rounded p-2 text-sm outline-none">
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-semibold text-slate-600">单号</label>
+              <button v-if="!isEditingHistory" @click="recalcOrderNo" title="重新核准此分类单号" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
+              <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
+            </div>
+            <input v-model="activeOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold text-slate-800">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-semibold text-green-700 mb-1">绿条显示厂家/供应商 (采购单默认: 雄达皮具)</label>
+            <input v-model="activeOrder.supplier" type="text" placeholder="居中显示在绿色横条上，留空则为纯绿条" 
+                   class="w-full border border-green-300 rounded p-2 text-sm outline-none bg-green-50">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">订单日期 (DATE)</label>
+            <input v-model="activeOrder.orderDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">交货时间 (日期选择)</label>
+            <input v-model="activeOrder.deliveryDate" type="date" class="w-full border rounded p-2 text-sm outline-none">
+          </div>
+        </div>
+
+        <!-- 商品明细 -->
+        <div class="flex justify-between items-center mb-2 pt-2 border-t">
+          <label class="text-sm font-bold text-slate-700">商品明细项</label>
+          <button @click="addItem" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 font-medium">
+            + 添加一行
+          </button>
+        </div>
+
+        <div class="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+          <div v-for="(item, index) in activeOrder.items" :key="index" class="p-3 bg-slate-50 border rounded-lg relative">
+            <button @click="removeItem(index)" v-if="activeOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
+            <div class="text-xs font-bold text-slate-500 mb-2"># 序号 {{ index + 1 }}</div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+              <div>
+                <span class="text-xs text-slate-500">商品名称 *</span>
+                <input v-model="item.name" type="text" placeholder="输入商品名称" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+              <div>
+                <span class="text-xs text-slate-500">数量 (Quantity)</span>
+                <input v-model.number="item.quantity" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+              <div>
+                <span class="text-xs text-slate-500">单价 (Unit Price)</span>
+                <input v-model.number="item.price" type="number" step="0.01" min="0" placeholder="0.00" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 mb-2">
+              <div>
+                <span class="text-xs text-red-600 font-semibold">要求（G数，颜色，大小，印刷工艺等）</span>
+                <textarea v-model="item.requirements" rows="2" placeholder="如工艺、克重、颜色要求等" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+              <div>
+                <span class="text-xs text-slate-500">规格编号 / 定制说明</span>
+                <input v-model="item.customType" type="text" placeholder="如：大货或客户定制" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+              <div>
+                <span class="text-xs text-slate-500">其它备注 (Other)</span>
+                <input v-model="item.other" type="text" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+            </div>
+
+            <!-- 图片上传 -->
+            <div class="flex items-center justify-between pt-2 border-t border-slate-200">
+              <div class="flex items-center space-x-2">
+                <label class="cursor-pointer text-xs bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-50">
+                  <span>{{ item.image ? '更换图片' : '上传图片' }}</span>
+                  <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, index)">
+                </label>
+                <div v-if="item.image" class="flex items-center space-x-1">
+                  <img :src="item.image" class="w-7 h-7 object-contain border bg-white rounded">
+                  <button @click="item.image = ''" class="text-xs text-red-500">删除</button>
+                </div>
+              </div>
+              <div class="text-xs text-slate-600 font-medium">
+                金额：<span class="font-bold text-red-600">¥ {{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 装箱单 Packing List 表单 -->
+      <div v-else-if="currentTab === 'packing'">
+        <div class="flex justify-between items-center mb-3 pb-2 border-b">
+          <h2 class="text-base font-bold text-slate-700">装箱单 (Packing list) 录入</h2>
+          <span class="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">装箱单独立单号体系</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-semibold text-slate-600">单号</label>
+              <button v-if="!isEditingHistory" @click="recalcOrderNo" class="text-[11px] text-blue-600 hover:underline">🔄 独立校准</button>
+              <span v-else class="text-[11px] text-amber-600 font-bold">🔒 原单号修改中</span>
+            </div>
+            <input v-model="packingOrder.orderNo" type="text" class="w-full border rounded p-2 text-sm outline-none font-semibold">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">顶部日期</label>
+            <input v-model="packingOrder.date" type="date" class="w-full border rounded p-2 text-sm outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">主英文标题</label>
+            <input v-model="packingOrder.titleEn" type="text" class="w-full border rounded p-2 text-sm outline-none">
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">底部送货地址与联系人信息</label>
+            <textarea v-model="packingOrder.deliveryAddress" rows="4" 
+                      class="w-full border rounded p-2 text-xs outline-none font-mono"></textarea>
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center mb-2 pt-2 border-t">
+          <label class="text-sm font-bold text-slate-700">装箱货物明细</label>
+          <button @click="addPackingItem" class="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded hover:bg-emerald-100 font-medium">
+            + 添加装箱明细
+          </button>
+        </div>
+
+        <div class="space-y-4 max-h-[550px] overflow-y-auto pr-1">
+          <div v-for="(pItem, pIdx) in packingOrder.items" :key="pIdx" class="p-3 bg-slate-50 border rounded-lg relative">
+            <button @click="removePackingItem(pIdx)" v-if="packingOrder.items.length > 1" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-bold px-1 text-sm">✕</button>
+            <div class="text-xs font-bold text-slate-500 mb-2"># 货物 {{ pIdx + 1 }}</div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+              <div>
+                <span class="text-xs text-slate-500">品名/型号 ITEMS *</span>
+                <textarea v-model="pItem.name" rows="2" placeholder="输入品名/型号" class="w-full border rounded p-1.5 text-xs mt-0.5"></textarea>
+              </div>
+              <div>
+                <div class="flex justify-between items-center">
+                  <span class="text-xs text-slate-500">展示模式</span>
+                  <label class="text-xs text-blue-600 cursor-pointer">
+                    <input type="checkbox" v-model="pItem.isTextMode"> 纯文字(如:备品)
+                  </label>
+                </div>
+
+                <div v-if="!pItem.isTextMode" class="mt-2">
+                  <label class="cursor-pointer text-xs bg-white border px-2.5 py-1 rounded hover:bg-slate-50 inline-block">
+                    <span>{{ pItem.image ? '更换图片' : '上传图片' }}</span>
+                    <input type="file" accept="image/*" class="hidden" @change="uploadPackingImage($event, pIdx)">
+                  </label>
+                  <div v-if="pItem.image" class="mt-1 flex items-center space-x-1">
+                    <img :src="pItem.image" class="w-8 h-8 object-contain border bg-white rounded">
+                    <button @click="pItem.image = ''" class="text-xs text-red-500">删除</button>
+                  </div>
+                </div>
+
+                <div v-else class="mt-1">
+                  <input v-model="pItem.textDesc" type="text" placeholder="输入说明内容，如：备品" class="w-full border rounded p-1.5 text-xs">
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+              <div>
+                <span class="text-xs text-slate-500">数量/盒 (QTY/CTN)</span>
+                <input v-model.number="pItem.qtyPerCtn" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+              <div>
+                <span class="text-xs text-slate-500">件数 (CTN)</span>
+                <input v-model.number="pItem.ctnCount" type="number" min="0" placeholder="0" class="w-full border rounded p-1.5 text-xs mt-0.5">
+              </div>
+              <div>
+                <span class="text-xs text-slate-500">总数量 (自动乘算)</span>
+                <div class="w-full bg-slate-200 rounded p-1.5 text-xs mt-0.5 font-bold text-center text-slate-700">
+                  {{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ================= 实时预览区域 (右侧：自适应缩放 + 点击任意处放大) ================= -->
+    <div class="xl:col-span-7">
+      <div class="sticky top-4">
+        <div class="flex justify-between items-center mb-2 px-1">
+          <span class="text-xs font-semibold text-slate-600 flex items-center gap-1">
+            <span>整页实时预览</span>
+            <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[11px] font-normal cursor-pointer" @click="isZoomModalOpen = true">🔍 点击任意部位放大查看</span>
+          </span>
+          <span class="text-xs text-purple-600 font-medium">支持直接 Ctrl+V 发微信</span>
+        </div>
+
+        <div ref="previewWrapper" 
+             @click="isZoomModalOpen = true"
+             title="点击放大单据"
+             class="w-full bg-slate-200/60 p-2 sm:p-4 rounded-xl border border-slate-200 flex justify-center overflow-hidden cursor-zoom-in group hover:border-blue-400 transition">
+          
+          <div :style="{
+                 width: `${(currentTab === 'packing' ? 860 : 940) * scaleFactor}px`,
+                 height: `${targetHeight * scaleFactor}px`,
+                 overflow: 'hidden'
+               }" class="transition-all duration-150 relative">
+
+            <div class="absolute top-2 right-2 z-10 bg-black/60 text-white text-[10px] px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition pointer-events-none">
+              🔍 点击放大
+            </div>
+
+            <!-- 1 & 2. 销售订单 / 采购单预览 -->
+            <div v-if="currentTab === 'sale' || currentTab === 'purchase'" 
+                 id="invoice-target" 
+                 ref="invoiceTargetRef"
+                 :style="{
+                   transform: `scale(${scaleFactor})`,
+                   transformOrigin: 'top left',
+                   width: '940px'
+                 }"
+                 class="bg-white p-4 font-sans text-black box-border shadow-sm">
+              
+              <div class="flex justify-between items-baseline mb-2 px-1">
+                <div class="text-2xl font-bold tracking-wider" style="font-family: 'SimSun', 'STSong', serif;">
+                  {{ activeOrder.customer || '' }}{{ currentTab === 'sale' ? '订单' : '采购单' }}
+                </div>
+                <div class="text-2xl font-bold tracking-wide" style="font-family: 'SimSun', 'STSong', serif;">
+                  单号：{{ activeOrder.orderNo }}
+                </div>
+              </div>
+
+              <!-- 绿色横条 -->
+              <div class="w-full mb-1 font-bold text-center overflow-hidden" 
+                   :style="{
+                     backgroundColor: '#009944',
+                     height: activeOrder.supplier ? '28px' : '12px',
+                     lineHeight: activeOrder.supplier ? '28px' : '12px',
+                     fontSize: '13px',
+                     color: '#000000'
+                   }">
+                {{ activeOrder.supplier }}
+              </div>
+
+              <table class="sheet-table text-[13px]">
+                <colgroup>
+                  <col style="width: 45px;"><col style="width: 100px;"><col style="width: 75px;"><col style="width: 65px;">
+                  <col style="width: 70px;"><col style="width: 180px;"><col style="width: 175px;"><col style="width: 110px;"><col style="width: 88px;">
+                </colgroup>
+
+                <tr style="height: 38px;">
+                  <td style="background-color: #c0c0c0;"></td>
+                  <td></td>
+                  <td style="background-color: #e0e0e0;">
+                    <div class="font-bold text-[12px]">订单日期</div>
+                    <div class="text-[10px] text-slate-600 mt-0.5">DATE</div>
+                  </td>
+                  <td colspan="3" class="text-center font-bold px-2 text-[13px]">
+                    {{ activeOrder.orderDate }}
+                  </td>
+                  <td style="background-color: #f2f2f2; font-bold text-[13px]">交货时间</td>
+                  <td colspan="2" class="text-center font-bold px-2 text-[13px]">
+                    {{ activeOrder.deliveryDate }}
+                  </td>
+                </tr>
+
+                <tr style="background-color: #ffff00; font-weight: bold; height: 68px;">
+                  <td><div>序号</div><div class="text-[10px] font-normal leading-tight mt-1">Serial<br>number</div></td>
+                  <td><div>商品名称</div><div class="text-[10px] font-normal leading-tight mt-1">Product<br>Name</div></td>
+                  <td><div>数量</div><div class="text-[10px] font-normal leading-tight mt-1">Quantity</div></td>
+                  <td><div>单价</div><div class="text-[10px] font-normal leading-tight mt-1">Unit<br>Price</div></td>
+                  <td><div>金额</div><div class="text-[10px] font-normal leading-tight mt-1">Total<br>Price</div></td>
+                  <td><div>图片</div><div class="text-[10px] font-normal leading-tight mt-1">Picture</div></td>
+                  <td style="color: #ff0000;">
+                    <div class="text-[11px] leading-snug">要求（G数，颜色，大小，印刷工艺等）</div>
+                    <div class="text-[10px] leading-tight mt-1">MARK</div>
+                  </td>
+                  <td><div class="text-[12px] leading-snug">大货或客户定制</div></td>
+                  <td><div>其它备注</div><div class="text-[10px] font-normal leading-tight mt-1">Oher</div></td>
+                </tr>
+
+                <tr v-for="(item, idx) in activeOrder.items" :key="idx" class="h-28">
+                  <td class="font-bold text-sm">{{ idx + 1 }}</td>
+                  <td class="font-bold text-xs p-1">{{ item.name }}</td>
+                  <td class="font-bold text-sm">{{ item.quantity || 0 }}</td>
+                  <td class="text-xs">{{ item.price ? Number(item.price).toFixed(2) : '' }}</td>
+                  <td class="font-bold text-xs">{{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(0) }}</td>
+                  
+                  <td class="p-1 overflow-hidden">
+                    <div class="w-full h-24 flex items-center justify-center overflow-hidden">
+                      <img v-if="item.image" :src="item.image" class="max-h-24 max-w-full object-contain mx-auto block">
+                      <span v-else class="text-slate-300 text-xs">无图片</span>
+                    </div>
+                  </td>
+
+                  <td class="p-2 font-bold text-xs" style="color: #ff0000; word-break: break-all; white-space: pre-wrap;">{{ item.requirements }}</td>
+                  <td class="text-xs p-1 font-bold">{{ item.customType }}</td>
+                  <td class="text-xs p-1">{{ item.other }}</td>
+                </tr>
+
+                <tr style="background-color: #fce4d6; height: 44px; font-weight: bold; color: #ff0000;">
+                  <td colspan="2" class="text-sm tracking-wider">总计TOTAL</td>
+                  <td class="text-base">{{ activeTotalQuantity }}</td>
+                  <td></td>
+                  <td class="text-base">{{ activeTotalAmount }}</td>
+                  <td colspan="4"></td>
+                </tr>
+              </table>
+            </div>
+
+            <!-- 3. 装箱单 (Packing list) 预览 -->
+            <div v-else-if="currentTab === 'packing'" 
+                 id="invoice-target" 
+                 ref="invoiceTargetRef"
+                 :style="{
+                   transform: `scale(${scaleFactor})`,
+                   transformOrigin: 'top left',
+                   width: '860px'
+                 }"
+                 class="bg-white p-4 font-sans text-black box-border shadow-sm">
+              
+              <div class="relative mb-0 border border-black py-3 px-4 flex flex-col items-center justify-center min-h-[76px]" style="background-color: #82ba41;">
+                <div class="text-center">
+                  <div class="text-xl tracking-wider leading-snug" style="font-family: 'Times New Roman', serif;">{{ packingOrder.titleEn }}</div>
+                  <div class="text-2xl font-bold tracking-widest leading-snug mt-1">{{ packingOrder.titleCn }}</div>
+                </div>
+                <div class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium">
+                  {{ packingOrder.date }}
+                </div>
+              </div>
+
+              <table class="sheet-table text-[13px]" style="border-top: none;">
+                <colgroup>
+                  <col style="width: 140px;"><col style="width: 100px;"><col style="width: 110px;">
+                  <col style="width: 100px;"><col style="width: 120px;"><col style="width: 120px;">
+                </colgroup>
+
+                <tr style="font-weight: bold; height: 48px; background-color: #ffffff;">
+                  <td colspan="2"><div>品名/型号</div><div class="text-[11px] font-normal mt-0.5">ITEMS</div></td>
+                  <td><div>数量/盒</div><div class="text-[11px] font-normal mt-0.5">QTY/CTN</div></td>
+                  <td><div>件数</div><div class="text-[11px] font-normal mt-0.5">CTN</div></td>
+                  <td><div>总数量</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+                  <td><div>总数</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+                </tr>
+
+                <tr v-for="(pItem, idx) in packingOrder.items" :key="idx" class="h-24">
+                  <td class="font-bold text-sm p-2 whitespace-pre-wrap leading-snug">{{ pItem.name }}</td>
+                  <td class="p-1 overflow-hidden">
+                    <div v-if="!pItem.isTextMode && pItem.image" class="w-full h-20 flex items-center justify-center overflow-hidden">
+                      <img :src="pItem.image" class="max-h-20 max-w-full object-contain mx-auto block">
+                    </div>
+                    <div v-else-if="pItem.isTextMode" class="font-bold text-base">{{ pItem.textDesc || '备品' }}</div>
+                    <span v-else class="text-slate-300 text-xs">无</span>
+                  </td>
+                  <td class="font-bold text-base">{{ pItem.qtyPerCtn || 0 }}</td>
+                  <td class="font-bold text-base">{{ pItem.ctnCount || 0 }}</td>
+                  <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+                  <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+                </tr>
+
+                <tr style="background-color: #ffff00; height: 44px; font-weight: bold;">
+                  <td colspan="3" class="text-base tracking-widest">TOTAL</td>
+                  <td class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalCtn }}</td>
+                  <td colspan="2" class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalQty }}</td>
+                </tr>
+
+                <tr>
+                  <td colspan="6" style="border: 1px solid #000; padding: 14px 10px; background-color: #ffffff;" 
+                      class="text-xs leading-relaxed font-medium whitespace-pre-wrap text-slate-900">
+                    {{ packingOrder.deliveryAddress }}
+                  </td>
+                </tr>
+              </table>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= 核心新增：修改保存成功反馈面板 (明确下一步动作) ================= -->
+  <div v-if="showSaveSuccessModal" 
+       class="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-100">
+      <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 font-bold">
+        ✓
+      </div>
+      <h3 class="text-lg font-bold text-slate-800">修改已成功保存！</h3>
+      <p class="text-xs text-slate-500 mt-1 mb-5">
+        单号 <span class="font-bold text-blue-600">【{{ lastSavedOrderNo }}】</span> 已在历史记录中原地更新完毕，绝无重复多余单号。接下来您可以选择：
+      </p>
+      
+      <div class="space-y-2.5">
+        <button @click="finishEditAndNewOrder" 
+                class="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-bold shadow-sm transition active:scale-95 flex items-center justify-center gap-1.5">
+          <span>➕</span><span>退出修改，准备开下一单</span>
+        </button>
+
+        <button @click="finishEditAndViewHistory" 
+                class="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-sm font-medium transition active:scale-95 flex items-center justify-center gap-1.5">
+          <span>📜</span><span>打开历史记录查看核对</span>
+        </button>
+
+        <button @click="showSaveSuccessModal = false" 
+                class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium transition">
+          留在当前页面 (可重新生成图片/发微信)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 放大预览模态框 (点击任意处放大，带X按钮关闭) ================= -->
+  <div v-if="isZoomModalOpen" 
+       class="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-start p-2 sm:p-6 overflow-auto backdrop-blur-sm"
+       @click.self="isZoomModalOpen = false">
+    
+    <div class="w-full max-w-[980px] flex justify-between items-center mb-2 px-2 sticky top-2 z-[60]">
+      <span class="text-white text-sm bg-black/50 px-3 py-1 rounded-full font-medium">🔍 100% 高清放大查看视图 (支持滑动细看)</span>
+      <button @click="isZoomModalOpen = false" 
+              title="关闭放大视图"
+              class="bg-red-600 hover:bg-red-700 text-white rounded-full w-9 h-9 flex items-center justify-center text-lg font-bold shadow-xl transition active:scale-95">
+        ✕
+      </button>
+    </div>
+
+    <div class="overflow-auto max-w-full pb-10" @click.stop>
+      <!-- 放大版：销售订单 / 采购单 -->
+      <div v-if="currentTab === 'sale' || currentTab === 'purchase'" 
+           class="w-[940px] bg-white p-4 font-sans text-black box-border shadow-2xl rounded-sm">
+        <div class="flex justify-between items-baseline mb-2 px-1">
+          <div class="text-2xl font-bold tracking-wider" style="font-family: 'SimSun', 'STSong', serif;">
+            {{ activeOrder.customer || '' }}{{ currentTab === 'sale' ? '订单' : '采购单' }}
+          </div>
+          <div class="text-2xl font-bold tracking-wide" style="font-family: 'SimSun', 'STSong', serif;">
+            单号：{{ activeOrder.orderNo }}
+          </div>
+        </div>
+        <div class="w-full mb-1 font-bold text-center overflow-hidden" 
+             :style="{
+               backgroundColor: '#009944',
+               height: activeOrder.supplier ? '28px' : '12px',
+               lineHeight: activeOrder.supplier ? '28px' : '12px',
+               fontSize: '13px',
+               color: '#000000'
+             }">
+          {{ activeOrder.supplier }}
+        </div>
+        <table class="sheet-table text-[13px]">
+          <colgroup>
+            <col style="width: 45px;"><col style="width: 100px;"><col style="width: 75px;"><col style="width: 65px;">
+            <col style="width: 70px;"><col style="width: 180px;"><col style="width: 175px;"><col style="width: 110px;"><col style="width: 88px;">
+          </colgroup>
+          <tr style="height: 38px;">
+            <td style="background-color: #c0c0c0;"></td><td></td>
+            <td style="background-color: #e0e0e0;">
+              <div class="font-bold text-[12px]">订单日期</div>
+              <div class="text-[10px] text-slate-600 mt-0.5">DATE</div>
+            </td>
+            <td colspan="3" class="text-center font-bold px-2 text-[13px]">{{ activeOrder.orderDate }}</td>
+            <td style="background-color: #f2f2f2; font-bold text-[13px]">交货时间</td>
+            <td colspan="2" class="text-center font-bold px-2 text-[13px]">{{ activeOrder.deliveryDate }}</td>
+          </tr>
+          <tr style="background-color: #ffff00; font-weight: bold; height: 68px;">
+            <td><div>序号</div><div class="text-[10px] font-normal leading-tight mt-1">Serial<br>number</div></td>
+            <td><div>商品名称</div><div class="text-[10px] font-normal leading-tight mt-1">Product<br>Name</div></td>
+            <td><div>数量</div><div class="text-[10px] font-normal leading-tight mt-1">Quantity</div></td>
+            <td><div>单价</div><div class="text-[10px] font-normal leading-tight mt-1">Unit<br>Price</div></td>
+            <td><div>金额</div><div class="text-[10px] font-normal leading-tight mt-1">Total<br>Price</div></td>
+            <td><div>图片</div><div class="text-[10px] font-normal leading-tight mt-1">Picture</div></td>
+            <td style="color: #ff0000;">
+              <div class="text-[11px] leading-snug">要求（G数，颜色，大小，印刷工艺等）</div>
+              <div class="text-[10px] leading-tight mt-1">MARK</div>
+            </td>
+            <td><div class="text-[12px] leading-snug">大货或客户定制</div></td>
+            <td><div>其它备注</div><div class="text-[10px] font-normal leading-tight mt-1">Oher</div></td>
+          </tr>
+          <tr v-for="(item, idx) in activeOrder.items" :key="idx" class="h-28">
+            <td class="font-bold text-sm">{{ idx + 1 }}</td>
+            <td class="font-bold text-xs p-1">{{ item.name }}</td>
+            <td class="font-bold text-sm">{{ item.quantity || 0 }}</td>
+            <td class="text-xs">{{ item.price ? Number(item.price).toFixed(2) : '' }}</td>
+            <td class="font-bold text-xs">{{ ((Number(item.quantity) || 0) * (Number(item.price) || 0)).toFixed(0) }}</td>
+            <td class="p-1 overflow-hidden">
+              <div class="w-full h-24 flex items-center justify-center overflow-hidden">
+                <img v-if="item.image" :src="item.image" class="max-h-24 max-w-full object-contain mx-auto block">
+                <span v-else class="text-slate-300 text-xs">无图片</span>
+              </div>
+            </td>
+            <td class="p-2 font-bold text-xs" style="color: #ff0000; word-break: break-all; white-space: pre-wrap;">{{ item.requirements }}</td>
+            <td class="text-xs p-1 font-bold">{{ item.customType }}</td>
+            <td class="text-xs p-1">{{ item.other }}</td>
+          </tr>
+          <tr style="background-color: #fce4d6; height: 44px; font-weight: bold; color: #ff0000;">
+            <td colspan="2" class="text-sm tracking-wider">总计TOTAL</td>
+            <td class="text-base">{{ activeTotalQuantity }}</td>
+            <td></td>
+            <td class="text-base">{{ activeTotalAmount }}</td>
+            <td colspan="4"></td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- 放大版：装箱单 -->
+      <div v-else-if="currentTab === 'packing'" 
+           class="w-[860px] bg-white p-4 font-sans text-black box-border shadow-2xl rounded-sm">
+        <div class="relative mb-0 border border-black py-3 px-4 flex flex-col items-center justify-center min-h-[76px]" style="background-color: #82ba41;">
+          <div class="text-center">
+            <div class="text-xl tracking-wider leading-snug" style="font-family: 'Times New Roman', serif;">{{ packingOrder.titleEn }}</div>
+            <div class="text-2xl font-bold tracking-widest leading-snug mt-1">{{ packingOrder.titleCn }}</div>
+          </div>
+          <div class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium">{{ packingOrder.date }}</div>
+        </div>
+        <table class="sheet-table text-[13px]" style="border-top: none;">
+          <colgroup>
+            <col style="width: 140px;"><col style="width: 100px;"><col style="width: 110px;">
+            <col style="width: 100px;"><col style="width: 120px;"><col style="width: 120px;">
+          </colgroup>
+          <tr style="font-weight: bold; height: 48px; background-color: #ffffff;">
+            <td colspan="2"><div>品名/型号</div><div class="text-[11px] font-normal mt-0.5">ITEMS</div></td>
+            <td><div>数量/盒</div><div class="text-[11px] font-normal mt-0.5">QTY/CTN</div></td>
+            <td><div>件数</div><div class="text-[11px] font-normal mt-0.5">CTN</div></td>
+            <td><div>总数量</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+            <td><div>总数</div><div class="text-[11px] font-normal mt-0.5">TOTAL QTY</div></td>
+          </tr>
+          <tr v-for="(pItem, idx) in packingOrder.items" :key="idx" class="h-24">
+            <td class="font-bold text-sm p-2 whitespace-pre-wrap leading-snug">{{ pItem.name }}</td>
+            <td class="p-1 overflow-hidden">
+              <div v-if="!pItem.isTextMode && pItem.image" class="w-full h-20 flex items-center justify-center overflow-hidden">
+                <img :src="pItem.image" class="max-h-20 max-w-full object-contain mx-auto block">
+              </div>
+              <div v-else-if="pItem.isTextMode" class="font-bold text-base">{{ pItem.textDesc || '备品' }}</div>
+              <span v-else class="text-slate-300 text-xs">无</span>
+            </td>
+            <td class="font-bold text-base">{{ pItem.qtyPerCtn || 0 }}</td>
+            <td class="font-bold text-base">{{ pItem.ctnCount || 0 }}</td>
+            <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+            <td class="font-bold text-base">{{ (Number(pItem.qtyPerCtn) || 0) * (Number(pItem.ctnCount) || 0) }}</td>
+          </tr>
+          <tr style="background-color: #ffff00; height: 44px; font-weight: bold;">
+            <td colspan="3" class="text-base tracking-widest">TOTAL</td>
+            <td class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalCtn }}</td>
+            <td colspan="2" class="text-lg font-bold" style="color: #ff0000;">{{ packingTotalQty }}</td>
+          </tr>
+          <tr>
+            <td colspan="6" style="border: 1px solid #000; padding: 14px 10px; background-color: #ffffff;" 
+                class="text-xs leading-relaxed font-medium whitespace-pre-wrap text-slate-900">
+              {{ packingOrder.deliveryAddress }}
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 历史单据管理模态框 (3种分类完全隔离) ================= -->
+  <div v-if="showHistoryModal" 
+       class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-6 backdrop-blur-sm"
+       @click.self="showHistoryModal = false">
+    <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- 弹窗顶栏 -->
+      <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+        <div>
+          <h3 class="text-lg font-bold text-slate-800">📜 历史单据分类管理与批量归档</h3>
+          <p class="text-xs text-slate-500 mt-0.5">调出修改后点击保存即可原地覆盖，绝不跳号</p>
+        </div>
+        <button @click="showHistoryModal = false" class="text-slate-400 hover:text-slate-600 text-xl font-bold px-2">✕</button>
+      </div>
+
+      <!-- 批量导出工具条与密码清空操作栏 -->
+      <div class="bg-blue-50/70 p-3.5 border-b border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-bold text-blue-900">导出时间范围：</span>
+          <input type="date" v-model="exportStartDate" class="border border-blue-200 rounded px-2 py-1 bg-white outline-none">
+          <span class="text-slate-400">至</span>
+          <input type="date" v-model="exportEndDate" class="border border-blue-200 rounded px-2 py-1 bg-white outline-none">
+          
+          <button @click="batchExportZip" :disabled="batchExporting" 
+                  class="ml-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm transition active:scale-95 flex items-center gap-1">
+            <span>📦</span>
+            <span>{{ batchExporting ? batchProgressText : '导出指定时段归档包 (ZIP)' }}</span>
+          </button>
+        </div>
+
+        <div>
+          <button @click="clearAllHistoryWithPassword" 
+                  class="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 rounded-lg font-bold transition active:scale-95 flex items-center gap-1">
+            <span>🔒</span>
+            <span>全部清空 (需密码)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 分类选项卡切换 (3种分开) -->
+      <div class="flex border-b bg-slate-100 px-4 pt-2 gap-2">
+        <button @click="historyCategory = 'sale'"
+                :class="historyCategory === 'sale' ? 'bg-white text-blue-600 border-t-2 border-blue-600 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2.5 rounded-t-lg text-xs sm:text-sm transition flex items-center gap-1.5">
+          <span>📋</span> 客户订单
+          <span class="text-xs px-1.5 py-0.2 rounded-full" :class="historyCategory === 'sale' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'">
+            {{ getHistoryCount('sale') }}
+          </span>
+        </button>
+
+        <button @click="historyCategory = 'purchase'"
+                :class="historyCategory === 'purchase' ? 'bg-white text-blue-600 border-t-2 border-blue-600 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2.5 rounded-t-lg text-xs sm:text-sm transition flex items-center gap-1.5">
+          <span>🏭</span> 采购单
+          <span class="text-xs px-1.5 py-0.2 rounded-full" :class="historyCategory === 'purchase' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'">
+            {{ getHistoryCount('purchase') }}
+          </span>
+        </button>
+
+        <button @click="historyCategory = 'packing'"
+                :class="historyCategory === 'packing' ? 'bg-white text-emerald-600 border-t-2 border-emerald-600 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-200'"
+                class="px-4 py-2.5 rounded-t-lg text-xs sm:text-sm transition flex items-center gap-1.5">
+          <span>📦</span> 装箱单
+          <span class="text-xs px-1.5 py-0.2 rounded-full" :class="historyCategory === 'packing' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'">
+            {{ getHistoryCount('packing') }}
+          </span>
+        </button>
+      </div>
+
+      <!-- 分类内容列表 -->
+      <div class="p-4 overflow-y-auto flex-1 bg-white">
+        <div v-if="filteredHistoryList.length === 0" class="text-center py-12 text-slate-400 text-sm">
+          <span>该分类下暂无已保存的单据记录</span>
+        </div>
+        
+        <div v-else class="space-y-3">
+          <div v-for="(rec) in filteredHistoryList" :key="rec.id" 
+               class="p-3 bg-slate-50 hover:bg-blue-50/50 border rounded-xl flex flex-wrap justify-between items-center gap-2 transition">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-sm text-slate-800">{{ rec.orderNo }}</span>
+                <span class="text-xs px-2 py-0.5 rounded font-medium"
+                      :class="rec.type === 'packing' ? 'bg-emerald-100 text-emerald-700' : (rec.type === 'purchase' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700')">
+                  {{ rec.type === 'sale' ? '客户订单' : (rec.type === 'purchase' ? '采购单' : '装箱单') }}
+                </span>
+                <span class="text-xs font-semibold text-slate-700">{{ rec.name || '未命名' }}</span>
+              </div>
+              <div class="text-xs text-slate-500 mt-1 flex gap-4">
+                <span>单据日期: {{ rec.date }}</span>
+                <span>创建时间: {{ rec.time }}</span>
+                <span v-if="rec.type !== 'packing'" class="font-semibold text-red-600">金额: ¥{{ rec.amount }}</span>
+              </div>
+            </div>
+
+            <!-- 操作动作 -->
+            <div class="flex gap-2">
+              <button @click="loadHistoryOrder(rec)" 
+                      class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium shadow transition">
+                ✏️ 调出重做
+              </button>
+              <button @click="deleteHistoryOrder(rec.id, rec.type)" 
+                      class="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium transition">
+                🗑️ 作废删除
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3 border-t bg-slate-50 text-right">
+        <button @click="showHistoryModal = false" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium">关闭</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+
+  createApp({
+    setup() {
+      const currentTab = ref('sale');
+      const loading = ref(false);
+      const copying = ref(false);
+      const exportingExcel = ref(false);
+
+      const isZoomModalOpen = ref(false);
+      const showHistoryModal = ref(false);
+      const historyCategory = ref('sale');
+
+      // 【核心修改模式状态管理】
+      const isEditingHistory = ref(false);
+      const editingOrderNo = ref('');
+      const lastSavedTime = ref('');
+      const showSaveSuccessModal = ref(false);
+      const lastSavedOrderNo = ref('');
+
+      const previewWrapper = ref(null);
+      const invoiceTargetRef = ref(null);
+      const scaleFactor = ref(1);
+      const targetHeight = ref(600);
+
+      const batchExporting = ref(false);
+      const batchProgressText = ref('');
+      const exportStartDate = ref('');
+      const exportEndDate = ref('');
+
+      const STORAGE_KEY = 'amber_orders_history_categorized_v6';
+      const historyList = ref([]);
+
+      const getTodayDate = () => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+
+      const initDefaultDateRange = () => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        exportStartDate.value = `${y}-${m}-01`;
+        exportEndDate.value = getTodayDate();
+      };
+
+      const loadHistoryFromStorage = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const rawList = JSON.parse(raw);
+            const now = Date.now();
+            const MAX_AGE = 370 * 24 * 60 * 60 * 1000;
+
+            let purgedCount = 0;
+            const validRecords = rawList.filter(item => {
+              const recordTime = item.createdAt || (item.date ? new Date(item.date).getTime() : now);
+              const isExpired = (now - recordTime) > MAX_AGE;
+              if (isExpired) purgedCount++;
+              return !isExpired;
+            });
+
+            historyList.value = validRecords;
+            if (purgedCount > 0) {
+              saveHistoryToStorage();
+              console.log(`[自动维护] 已自动清理 ${purgedCount} 条超过 370 天的超期历史单据`);
+            }
+          }
+        } catch (e) {
+          console.error('加载历史记录异常', e);
+        }
+      };
+
+      const saveHistoryToStorage = () => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(historyList.value));
+        } catch (e) {
+          console.error('保存历史记录异常', e);
+        }
+      };
+
+      const getNextOrderNoForType = (type, dateStr) => {
+        const base = (dateStr || getTodayDate()).replace(/-/g, '');
+        const typeRecords = historyList.value.filter(item => 
+          item.type === type && item.orderNo && item.orderNo.startsWith(base)
+        );
+        if (typeRecords.length === 0) {
+          return `${base}01`;
+        }
+        const seqs = typeRecords.map(item => {
+          const suffix = item.orderNo.slice(base.length);
+          const num = parseInt(suffix, 10);
+          return isNaN(num) ? 0 : num;
+        });
+        const maxSeq = Math.max(...seqs, 0);
+        return `${base}${String(maxSeq + 1).padStart(2, '0')}`;
+      };
+
+      const saleOrder = ref({
+        customer: '',
+        orderNo: '',
+        orderDate: getTodayDate(),
+        deliveryDate: '',
+        supplier: '',
+        items: [
+          { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+        ]
+      });
+
+      const purchaseOrder = ref({
+        customer: '',
+        orderNo: '',
+        orderDate: getTodayDate(),
+        deliveryDate: '',
+        supplier: '雄达皮具',
+        items: [
+          { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+        ]
+      });
+
+      const packingOrder = ref({
+        orderNo: '',
+        titleEn: 'Packing list',
+        titleCn: '装箱单',
+        date: getTodayDate(),
+        deliveryAddress: '送货地址：\n官志雄\n13631538141\n广东省深圳市龙岗区坂田街道上雪路3号亿达工业园D栋2楼201巨爵',
+        items: [
+          { name: '', image: '', isTextMode: false, textDesc: '', qtyPerCtn: '', ctnCount: '' }
+        ]
+      });
+
+      const activeOrder = computed(() => {
+        return currentTab.value === 'purchase' ? purchaseOrder.value : saleOrder.value;
+      });
+
+      const activeTotalQuantity = computed(() => {
+        return activeOrder.value.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+      });
+
+      const activeTotalAmount = computed(() => {
+        return activeOrder.value.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.price) || 0)), 0);
+      });
+
+      const packingTotalCtn = computed(() => {
+        return packingOrder.value.items.reduce((sum, item) => sum + (Number(item.ctnCount) || 0), 0);
+      });
+
+      const packingTotalQty = computed(() => {
+        return packingOrder.value.items.reduce((sum, item) => sum + ((Number(item.qtyPerCtn) || 0) * (Number(item.ctnCount) || 0)), 0);
+      });
+
+      const getHistoryCount = (type) => {
+        return historyList.value.filter(item => item.type === type).length;
+      };
+
+      const filteredHistoryList = computed(() => {
+        return historyList.value.filter(item => item.type === historyCategory.value);
+      });
+
+      const openHistoryModal = () => {
+        historyCategory.value = currentTab.value;
+        showHistoryModal.value = true;
+      };
+
+      const switchTab = (tab) => {
+        currentTab.value = tab;
+        nextTick(updateScale);
+      };
+
+      const recalcOrderNo = () => {
+        if (currentTab.value === 'packing') {
+          packingOrder.value.orderNo = getNextOrderNoForType('packing', packingOrder.value.date);
+        } else if (currentTab.value === 'purchase') {
+          purchaseOrder.value.orderNo = getNextOrderNoForType('purchase', purchaseOrder.value.orderDate);
+        } else {
+          saleOrder.value.orderNo = getNextOrderNoForType('sale', saleOrder.value.orderDate);
+        }
+      };
+
+      // 归档当前订单
+      const archiveCurrentOrder = () => {
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        let record = {
+          id: '',
+          type: currentTab.value,
+          orderNo: '',
+          name: '',
+          date: '',
+          time: timeStr,
+          amount: '0',
+          createdAt: Date.now(),
+          data: null
+        };
+
+        if (currentTab.value === 'packing') {
+          record.id = `packing_${packingOrder.value.orderNo}`;
+          record.orderNo = packingOrder.value.orderNo;
+          record.name = packingOrder.value.titleCn;
+          record.date = packingOrder.value.date;
+          record.data = JSON.parse(JSON.stringify(packingOrder.value));
+        } else {
+          record.id = `${currentTab.value}_${activeOrder.value.orderNo}`;
+          record.orderNo = activeOrder.value.orderNo;
+          record.name = activeOrder.value.customer || (currentTab.value === 'purchase' ? '采购单' : '客户订单');
+          record.date = activeOrder.value.orderDate;
+          record.amount = activeTotalAmount.value;
+          record.data = JSON.parse(JSON.stringify(activeOrder.value));
+        }
+
+        const existIdx = historyList.value.findIndex(item => item.id === record.id);
+        if (existIdx >= 0) {
+          historyList.value[existIdx] = record;
+        } else {
+          historyList.value.unshift(record);
+        }
+        saveHistoryToStorage();
+        lastSavedTime.value = timeStr;
+      };
+
+      // 【核心新增：保存修改并触发明确交互面板】
+      const saveEditedOrder = () => {
+        archiveCurrentOrder();
+        lastSavedOrderNo.value = editingOrderNo.value || (currentTab.value === 'packing' ? packingOrder.value.orderNo : activeOrder.value.orderNo);
+        showSaveSuccessModal.value = true;
+      };
+
+      // 动作1：修改保存后退出并准备开下一单
+      const finishEditAndNewOrder = () => {
+        showSaveSuccessModal.value = false;
+        isEditingHistory.value = false;
+        editingOrderNo.value = '';
+        lastSavedTime.value = '';
+
+        if (currentTab.value === 'packing') {
+          packingOrder.value.orderNo = getNextOrderNoForType('packing', packingOrder.value.date);
+          packingOrder.value.items = [
+            { name: '', image: '', isTextMode: false, textDesc: '', qtyPerCtn: '', ctnCount: '' }
+          ];
+        } else if (currentTab.value === 'purchase') {
+          purchaseOrder.value.orderNo = getNextOrderNoForType('purchase', purchaseOrder.value.orderDate);
+          purchaseOrder.value.customer = '';
+          purchaseOrder.value.supplier = '雄达皮具';
+          purchaseOrder.value.deliveryDate = '';
+          purchaseOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        } else {
+          saleOrder.value.orderNo = getNextOrderNoForType('sale', saleOrder.value.orderDate);
+          saleOrder.value.customer = '';
+          saleOrder.value.supplier = '';
+          saleOrder.value.deliveryDate = '';
+          saleOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        }
+        nextTick(updateScale);
+      };
+
+      // 动作2：修改保存后立即前往历史列表核对
+      const finishEditAndViewHistory = () => {
+        showSaveSuccessModal.value = false;
+        openHistoryModal();
+      };
+
+      // 退出修改模式
+      const exitEditMode = () => {
+        if (!confirm('确定退出修改模式吗？退出后将切换回新开单状态。')) return;
+        isEditingHistory.value = false;
+        editingOrderNo.value = '';
+        lastSavedTime.value = '';
+        
+        if (currentTab.value === 'packing') {
+          packingOrder.value.orderNo = getNextOrderNoForType('packing', packingOrder.value.date);
+          packingOrder.value.items = [
+            { name: '', image: '', isTextMode: false, textDesc: '', qtyPerCtn: '', ctnCount: '' }
+          ];
+        } else if (currentTab.value === 'purchase') {
+          purchaseOrder.value.orderNo = getNextOrderNoForType('purchase', purchaseOrder.value.orderDate);
+          purchaseOrder.value.customer = '';
+          purchaseOrder.value.supplier = '雄达皮具';
+          purchaseOrder.value.deliveryDate = '';
+          purchaseOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        } else {
+          saleOrder.value.orderNo = getNextOrderNoForType('sale', saleOrder.value.orderDate);
+          saleOrder.value.customer = '';
+          saleOrder.value.supplier = '';
+          saleOrder.value.deliveryDate = '';
+          saleOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        }
+        nextTick(updateScale);
+      };
+
+      // 调出历史重做
+      const loadHistoryOrder = (rec) => {
+        if (!confirm(`确定调出单号【${rec.orderNo}】重新修改吗？当前未保存内容将被覆盖。`)) return;
+        currentTab.value = rec.type;
+        if (rec.type === 'packing') {
+          packingOrder.value = JSON.parse(JSON.stringify(rec.data));
+        } else if (rec.type === 'purchase') {
+          purchaseOrder.value = JSON.parse(JSON.stringify(rec.data));
+        } else {
+          saleOrder.value = JSON.parse(JSON.stringify(rec.data));
+        }
+
+        isEditingHistory.value = true;
+        editingOrderNo.value = rec.orderNo;
+        lastSavedTime.value = rec.time || '';
+
+        showHistoryModal.value = false;
+        nextTick(updateScale);
+      };
+
+      const clearAllHistoryWithPassword = () => {
+        const inputPwd = prompt('⚠️ 警告：此操作将永久清空所有历史单据！\n请输入安全清空密码：');
+        if (inputPwd === null) return;
+        if (inputPwd.trim() === '667788') {
+          historyList.value = [];
+          saveHistoryToStorage();
+          isEditingHistory.value = false;
+          editingOrderNo.value = '';
+          lastSavedTime.value = '';
+          recalcOrderNo();
+          alert('✅ 验证成功！所有历史单据已全部清空，单号已归位。');
+        } else {
+          alert('❌ 密码错误，清空操作已被拒绝！');
+        }
+      };
+
+      const startNextOrder = () => {
+        archiveCurrentOrder();
+
+        isEditingHistory.value = false;
+        editingOrderNo.value = '';
+        lastSavedTime.value = '';
+
+        if (currentTab.value === 'packing') {
+          packingOrder.value.orderNo = getNextOrderNoForType('packing', packingOrder.value.date);
+          packingOrder.value.items = [
+            { name: '', image: '', isTextMode: false, textDesc: '', qtyPerCtn: '', ctnCount: '' }
+          ];
+        } else if (currentTab.value === 'purchase') {
+          purchaseOrder.value.orderNo = getNextOrderNoForType('purchase', purchaseOrder.value.orderDate);
+          purchaseOrder.value.customer = '';
+          purchaseOrder.value.supplier = '雄达皮具';
+          purchaseOrder.value.deliveryDate = '';
+          purchaseOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        } else {
+          saleOrder.value.orderNo = getNextOrderNoForType('sale', saleOrder.value.orderDate);
+          saleOrder.value.customer = '';
+          saleOrder.value.supplier = '';
+          saleOrder.value.deliveryDate = '';
+          saleOrder.value.items = [
+            { name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' }
+          ];
+        }
+        alert('✅ 当前单据已保存！已为您生成该分类下的独立下一单。');
+        nextTick(updateScale);
+      };
+
+      const deleteHistoryOrder = (id, type) => {
+        if (!confirm('确定彻底作废删除此单据吗？')) return;
+        historyList.value = historyList.value.filter(item => item.id !== id);
+        saveHistoryToStorage();
+        if (currentTab.value === type) recalcOrderNo();
+      };
+
+      const updateScale = () => {
+        if (!previewWrapper.value) return;
+        const targetWidth = currentTab.value === 'packing' ? 860 : 940;
+        const availableWidth = previewWrapper.value.clientWidth - 24;
+        if (availableWidth < targetWidth) {
+          scaleFactor.value = Math.max(0.32, availableWidth / targetWidth);
+        } else {
+          scaleFactor.value = 1;
+        }
+        if (invoiceTargetRef.value) {
+          targetHeight.value = invoiceTargetRef.value.offsetHeight;
+        }
+      };
+
+      const addItem = () => {
+        activeOrder.value.items.push({ name: '', quantity: '', price: '', image: '', requirements: '', customType: '', other: '' });
+      };
+      const removeItem = (idx) => activeOrder.value.items.splice(idx, 1);
+
+      const addPackingItem = () => {
+        packingOrder.value.items.push({ name: '', image: '', isTextMode: false, textDesc: '', qtyPerCtn: '', ctnCount: '' });
+      };
+      const removePackingItem = (idx) => packingOrder.value.items.splice(idx, 1);
+
+      const uploadImage = (event, index) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => { activeOrder.value.items[index].image = e.target.result; };
+        reader.readAsDataURL(file);
+      };
+
+      const uploadPackingImage = (event, index) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => { packingOrder.value.items[index].image = e.target.result; };
+        reader.readAsDataURL(file);
+      };
+
+      const getImageMeta = (base64) => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            let ext = 'png';
+            if (base64.includes('image/jpeg') || base64.includes('image/jpg')) ext = 'jpeg';
+            resolve({ width: img.naturalWidth || 100, height: img.naturalHeight || 100, ext, base64 });
+          };
+          img.onerror = () => resolve(null);
+          img.src = base64;
+        });
+      };
+
+      const getFilename = (ext) => {
+        let orderNo = '';
+        let name = '';
+
+        if (currentTab.value === 'sale') {
+          orderNo = saleOrder.value.orderNo || getNextOrderNoForType('sale');
+          name = saleOrder.value.customer.trim() || '客户订单';
+        } else if (currentTab.value === 'purchase') {
+          orderNo = purchaseOrder.value.orderNo || getNextOrderNoForType('purchase');
+          name = purchaseOrder.value.customer.trim() ? `${purchaseOrder.value.customer}采购单` : '采购单';
+        } else {
+          orderNo = packingOrder.value.orderNo || getNextOrderNoForType('packing');
+          name = packingOrder.value.titleCn.trim() || '装箱单';
+        }
+        return `${orderNo}-${name}.${ext}`;
+      };
+
+      const renderCanvas = async () => {
+        const target = document.getElementById('invoice-target');
+        return await html2canvas(target, {
+          scale: 2.5,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: 1600,
+          onclone: (clonedDoc) => {
+            const clonedTarget = clonedDoc.getElementById('invoice-target');
+            if (clonedTarget) clonedTarget.style.transform = 'none';
+          }
+        });
+      };
+
+      const generateExcelBufferForRecord = async (recordData, type) => {
+        const workbook = new ExcelJS.Workbook();
+        const thinBorder = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'thin', color: { argb: 'FF000000' } },
+          right: { style: 'thin', color: { argb: 'FF000000' } }
+        };
+
+        if (type === 'sale' || type === 'purchase') {
+          const worksheet = workbook.addWorksheet('订单明细', { views: [{ showGridLines: true }] });
+          worksheet.columns = [
+            { width: 9 }, { width: 15 }, { width: 11 }, { width: 9 },
+            { width: 10 }, { width: 25 }, { width: 22 }, { width: 15 }, { width: 13 }
+          ];
+
+          worksheet.mergeCells('A1:E1');
+          worksheet.mergeCells('F1:I1');
+          worksheet.getRow(1).height = 36;
+          
+          const tCell = worksheet.getCell('A1');
+          tCell.value = `${recordData.customer || ''}${type === 'sale' ? '订单' : '采购单'}`;
+          tCell.font = { name: 'SimSun', size: 20, bold: true };
+          tCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          const nCell = worksheet.getCell('F1');
+          nCell.value = `单号： ${recordData.orderNo}`;
+          nCell.font = { name: 'SimSun', size: 18, bold: true };
+          nCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          worksheet.getRow(2).height = recordData.supplier ? 18 : 10;
+          for (let col = 1; col <= 9; col++) {
+            worksheet.getRow(2).getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF009944' } };
+          }
+          if (recordData.supplier) {
+            worksheet.mergeCells('A2:I2');
+            const supCell = worksheet.getCell('A2');
+            supCell.value = recordData.supplier;
+            supCell.font = { bold: true, size: 10, color: { argb: 'FF000000' } };
+            supCell.alignment = { vertical: 'middle', horizontal: 'center' };
+          }
+
+          worksheet.getRow(3).height = 30;
+          worksheet.mergeCells('D3:F3');
+          worksheet.mergeCells('H3:I3');
+          const r3 = worksheet.getRow(3);
+          r3.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C0C0' } };
+          r3.getCell(3).value = '订单日期\nDATE';
+          r3.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+          r3.getCell(3).font = { size: 9, bold: true };
+          r3.getCell(3).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          r3.getCell(4).value = recordData.orderDate;
+          r3.getCell(4).alignment = { vertical: 'middle', horizontal: 'center' };
+          r3.getCell(7).value = '交货时间';
+          r3.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+          r3.getCell(7).alignment = { vertical: 'middle', horizontal: 'center' };
+          r3.getCell(8).value = recordData.deliveryDate;
+          r3.getCell(8).alignment = { vertical: 'middle', horizontal: 'center' };
+          for (let c = 1; c <= 9; c++) r3.getCell(c).border = thinBorder;
+
+          worksheet.getRow(4).height = 54;
+          const headers = ['序号\nSerial\nnumber', '商品名称\nProduct\nName', '数量\nQuantity', '单价\nUnit\nPrice', '金额\nTotal\nPrice', '图片\nPicture', '要求（G数，颜色，大小，印刷工艺等）\nMARK', '大货或客户定制', '其它备注\nOher'];
+          headers.forEach((h, idx) => {
+            const cell = worksheet.getRow(4).getCell(idx + 1);
+            cell.value = h;
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+            cell.border = thinBorder;
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.font = idx === 6 ? { color: { argb: 'FFFF0000' }, bold: true, size: 9 } : { bold: true, size: 9 };
+          });
+
+          let curRow = 5;
+          let totalQty = 0;
+          let totalAmt = 0;
+
+          for (let i = 0; i < recordData.items.length; i++) {
+            const item = recordData.items[i];
+            const row = worksheet.getRow(curRow);
+            row.height = 85;
+
+            const q = Number(item.quantity) || 0;
+            const p = Number(item.price) || 0;
+            const sub = q * p;
+            totalQty += q;
+            totalAmt += sub;
+
+            row.getCell(1).value = i + 1;
+            row.getCell(2).value = item.name;
+            row.getCell(3).value = q;
+            row.getCell(4).value = item.price ? p : '';
+            row.getCell(5).value = sub;
+            row.getCell(7).value = item.requirements;
+            row.getCell(7).font = { color: { argb: 'FFFF0000' }, bold: true, size: 10 };
+            row.getCell(8).value = item.customType;
+            row.getCell(8).font = { bold: true, size: 10 };
+            row.getCell(9).value = item.other;
+
+            for (let c = 1; c <= 9; c++) {
+              row.getCell(c).border = thinBorder;
+              row.getCell(c).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            }
+
+            if (item.image && item.image.startsWith('data:image')) {
+              const meta = await getImageMeta(item.image);
+              if (meta) {
+                const imageId = workbook.addImage({ base64: meta.base64, extension: meta.ext });
+                const scale = Math.min(165 / meta.width, 95 / meta.height);
+                const targetW = Math.max(1, Math.round(meta.width * scale));
+                const targetH = Math.max(1, Math.round(meta.height * scale));
+                const offsetX = Math.max(0, Math.round((195 - targetW) / 2));
+                const offsetY = Math.max(0, Math.round((113 - targetH) / 2));
+
+                worksheet.addImage(imageId, {
+                  tl: { col: 5, row: curRow - 1, nativeCol: 5, nativeRow: curRow - 1, nativeColOff: offsetX * 9525, nativeRowOff: offsetY * 9525 },
+                  ext: { width: targetW, height: targetH },
+                  editAs: 'oneCell'
+                });
+              }
+            }
+            curRow++;
+          }
+
+          const sumRow = worksheet.getRow(curRow);
+          sumRow.height = 34;
+          worksheet.mergeCells(`A${curRow}:B${curRow}`);
+          for (let c = 1; c <= 9; c++) {
+            sumRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+            sumRow.getCell(c).border = thinBorder;
+            sumRow.getCell(c).alignment = { vertical: 'middle', horizontal: 'center' };
+          }
+          sumRow.getCell(1).value = '总计TOTAL';
+          sumRow.getCell(1).font = { color: { argb: 'FFFF0000' }, bold: true, size: 11 };
+          sumRow.getCell(3).value = totalQty;
+          sumRow.getCell(3).font = { color: { argb: 'FFFF0000' }, bold: true, size: 12 };
+          sumRow.getCell(5).value = totalAmt;
+          sumRow.getCell(5).font = { color: { argb: 'FFFF0000' }, bold: true, size: 12 };
+        } 
+        else {
+          const worksheet = workbook.addWorksheet('装箱单', { views: [{ showGridLines: true }] });
+          worksheet.columns = [
+            { width: 18 }, { width: 15 }, { width: 14 },
+            { width: 12 }, { width: 15 }, { width: 15 }
+          ];
+
+          worksheet.mergeCells('A1:F1');
+          worksheet.mergeCells('A2:F2');
+          worksheet.getRow(1).height = 28;
+          worksheet.getRow(2).height = 32;
+
+          const h1 = worksheet.getCell('A1');
+          h1.value = recordData.titleEn;
+          h1.font = { name: 'Times New Roman', size: 16 };
+          h1.alignment = { vertical: 'middle', horizontal: 'center' };
+          h1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF82BA41' } };
+
+          const h2 = worksheet.getCell('A2');
+          h2.value = recordData.titleCn;
+          h2.font = { size: 18, bold: true };
+          h2.alignment = { vertical: 'middle', horizontal: 'center' };
+          h2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF82BA41' } };
+
+          worksheet.getCell('G1').value = recordData.date;
+          worksheet.getCell('G1').font = { size: 11 };
+
+          worksheet.mergeCells('A3:B3');
+          worksheet.getRow(3).height = 36;
+          const headers = ['品名/型号\nITEMS', '', '数量/盒\nQTY/CTN', '件数\nCTN', '总数量\nTOTAL QTY', '总数\nTOTAL QTY'];
+          headers.forEach((h, idx) => {
+            if (idx === 1) return;
+            const cell = worksheet.getRow(3).getCell(idx + 1);
+            cell.value = h;
+            cell.font = { bold: true, size: 10 };
+            cell.border = thinBorder;
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          });
+          worksheet.getRow(3).getCell(2).border = thinBorder;
+
+          let curRow = 4;
+          let totalCtn = 0;
+          let totalQty = 0;
+
+          for (let i = 0; i < recordData.items.length; i++) {
+            const pItem = recordData.items[i];
+            const row = worksheet.getRow(curRow);
+            row.height = (!pItem.isTextMode && pItem.image) ? 80 : 36;
+
+            const qc = Number(pItem.qtyPerCtn) || 0;
+            const cc = Number(pItem.ctnCount) || 0;
+            const itemTotal = qc * cc;
+            totalCtn += cc;
+            totalQty += itemTotal;
+
+            row.getCell(1).value = pItem.name;
+            row.getCell(1).font = { bold: true, size: 11 };
+
+            if (pItem.isTextMode) {
+              row.getCell(2).value = pItem.textDesc || '备品';
+              row.getCell(2).font = { bold: true, size: 12 };
+            } else if (pItem.image) {
+              const meta = await getImageMeta(pItem.image);
+              if (meta) {
+                const imageId = workbook.addImage({ base64: meta.base64, extension: meta.ext });
+                const scale = Math.min(100 / meta.width, 70 / meta.height);
+                const targetW = Math.max(1, Math.round(meta.width * scale));
+                const targetH = Math.max(1, Math.round(meta.height * scale));
+                const offsetX = Math.max(0, Math.round((120 - targetW) / 2));
+                const offsetY = Math.max(0, Math.round((105 - targetH) / 2));
+
+                worksheet.addImage(imageId, {
+                  tl: { col: 1, row: curRow - 1, nativeCol: 1, nativeRow: curRow - 1, nativeColOff: offsetX * 9525, nativeRowOff: offsetY * 9525 },
+                  ext: { width: targetW, height: targetH },
+                  editAs: 'oneCell'
+                });
+              }
+            }
+
+            row.getCell(3).value = qc;
+            row.getCell(4).value = cc;
+            row.getCell(5).value = itemTotal;
+            row.getCell(6).value = itemTotal;
+
+            for (let c = 1; c <= 6; c++) {
+              row.getCell(c).border = thinBorder;
+              row.getCell(c).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            }
+            curRow++;
+          }
+
+          const sumRow = worksheet.getRow(curRow);
+          sumRow.height = 34;
+          worksheet.mergeCells(`A${curRow}:C${curRow}`);
+          for (let c = 1; c <= 6; c++) {
+            sumRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+            sumRow.getCell(c).border = thinBorder;
+            sumRow.getCell(c).alignment = { vertical: 'middle', horizontal: 'center' };
+          }
+          sumRow.getCell(1).value = 'TOTAL';
+          sumRow.getCell(1).font = { bold: true, size: 12 };
+          sumRow.getCell(4).value = totalCtn;
+          sumRow.getCell(4).font = { color: { argb: 'FFFF0000' }, bold: true, size: 14 };
+          sumRow.getCell(5).value = totalQty;
+          sumRow.getCell(5).font = { color: { argb: 'FFFF0000' }, bold: true, size: 14 };
+          sumRow.getCell(6).value = totalQty;
+          sumRow.getCell(6).font = { color: { argb: 'FFFF0000' }, bold: true, size: 14 };
+
+          const addrStartRow = curRow + 1;
+          const addrEndRow = curRow + 4;
+          worksheet.mergeCells(`A${addrStartRow}:F${addrEndRow}`);
+
+          for (let r = addrStartRow; r <= addrEndRow; r++) {
+            worksheet.getRow(r).height = 18;
+            for (let c = 1; c <= 6; c++) {
+              worksheet.getRow(r).getCell(c).border = thinBorder;
+            }
+          }
+
+          const addrCell = worksheet.getCell(`A${addrStartRow}`);
+          addrCell.value = recordData.deliveryAddress;
+          addrCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          addrCell.font = { size: 10, bold: true };
+        }
+
+        return await workbook.xlsx.writeBuffer();
+      };
+
+      const batchExportZip = async () => {
+        if (!exportStartDate.value || !exportEndDate.value) {
+          alert('请先选择完整的导出起始和截止日期！');
+          return;
+        }
+
+        const targetList = historyList.value.filter(item => {
+          return item.date >= exportStartDate.value && item.date <= exportEndDate.value;
+        });
+
+        if (targetList.length === 0) {
+          alert(`在 ${exportStartDate.value} 至 ${exportEndDate.value} 期间未找到任何单据记录！`);
+          return;
+        }
+
+        if (!confirm(`在选定时段内共找到 ${targetList.length} 张单据，准备开始打包导出为多级目录 ZIP 压缩包，点击确定继续。`)) {
+          return;
+        }
+
+        batchExporting.value = true;
+        batchProgressText.value = '准备生成...';
+
+        const backupCurrentTab = currentTab.value;
+        const backupSale = JSON.parse(JSON.stringify(saleOrder.value));
+        const backupPurchase = JSON.parse(JSON.stringify(purchaseOrder.value));
+        const backupPacking = JSON.parse(JSON.stringify(packingOrder.value));
+
+        const zip = new JSZip();
+
+        try {
+          for (let i = 0; i < targetList.length; i++) {
+            const rec = targetList[i];
+            batchProgressText.value = `处理中 (${i + 1}/${targetList.length}): ${rec.orderNo}`;
+
+            const typeFolder = rec.type === 'sale' ? '客户订单' : (rec.type === 'purchase' ? '采购单' : '集箱单');
+            const fileBaseName = `${rec.orderNo}-${rec.name || '单据'}`;
+
+            const excelBuffer = await generateExcelBufferForRecord(rec.data, rec.type);
+            zip.file(`历史单据/${rec.date}/${typeFolder}/excel/${fileBaseName}.xlsx`, excelBuffer);
+
+            currentTab.value = rec.type;
+            if (rec.type === 'packing') {
+              packingOrder.value = JSON.parse(JSON.stringify(rec.data));
+            } else if (rec.type === 'purchase') {
+              purchaseOrder.value = JSON.parse(JSON.stringify(rec.data));
+            } else {
+              saleOrder.value = JSON.parse(JSON.stringify(rec.data));
+            }
+
+            await nextTick();
+            await new Promise(r => setTimeout(r, 60));
+
+            const canvas = await renderCanvas();
+            const imgDataUrl = canvas.toDataURL('image/png');
+            const imgBase64 = imgDataUrl.replace(/^data:image\/png;base64,/, '');
+            zip.file(`历史单据/${rec.date}/${typeFolder}/图片/${fileBaseName}.png`, imgBase64, { base64: true });
+          }
+
+          batchProgressText.value = '正在极速打包压缩...';
+          const zipBlob = await zip.generateAsync({ type: 'blob' });
+          saveAs(zipBlob, `历史单据_${exportStartDate.value}_至_${exportEndDate.value}.zip`);
+          alert('✅ 批量打包成功！多级结构文件已保存到本地。');
+        } catch (err) {
+          console.error(err);
+          alert('批量导出过程中出现错误，请检查单据数据。');
+        } finally {
+          currentTab.value = backupCurrentTab;
+          saleOrder.value = backupSale;
+          purchaseOrder.value = backupPurchase;
+          packingOrder.value = backupPacking;
+
+          batchExporting.value = false;
+          batchProgressText.value = '';
+          await nextTick();
+          updateScale();
+        }
+      };
+
+      const copyImage = async () => {
+        copying.value = true;
+        try {
+          archiveCurrentOrder();
+          const canvas = await renderCanvas();
+          canvas.toBlob(async (blob) => {
+            if (!blob) {
+              alert('图片渲染失败');
+              copying.value = false;
+              return;
+            }
+            try {
+              const item = new ClipboardItem({ 'image/png': blob });
+              await navigator.clipboard.write([item]);
+              alert('✅ 图片已复制到剪贴板，单据已自动归档！\n可直接在微信聊天框中 Ctrl+V 粘贴发送。');
+            } catch (err) {
+              console.error(err);
+              alert('剪贴板权限受限，已为您自动触发高清图片下载。');
+              const link = document.createElement('a');
+              link.download = getFilename('png');
+              link.href = canvas.toDataURL('image/png');
+              link.click();
+            } finally {
+              copying.value = false;
+            }
+          }, 'image/png');
+        } catch (e) {
+          alert('复制失败，请重试');
+          copying.value = false;
+        }
+      };
+
+      const exportImage = async () => {
+        loading.value = true;
+        try {
+          archiveCurrentOrder();
+          const canvas = await renderCanvas();
+          const link = document.createElement('a');
+          link.download = getFilename('png');
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        } catch (e) {
+          alert('图片导出失败，请重试');
+        } finally {
+          loading.value = false;
+        }
+      };
+
+      const exportExcel = async () => {
+        exportingExcel.value = true;
+        try {
+          archiveCurrentOrder();
+          const currentData = currentTab.value === 'packing' ? packingOrder.value : activeOrder.value;
+          const buffer = await generateExcelBufferForRecord(currentData, currentTab.value);
+          const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          saveAs(blob, getFilename('xlsx'));
+        } catch (err) {
+          console.error(err);
+          alert('导出 Excel 出错，请检查输入格式');
+        } finally {
+          exportingExcel.value = false;
+        }
+      };
+
+      onMounted(() => {
+        loadHistoryFromStorage();
+        initDefaultDateRange();
+
+        saleOrder.value.orderNo = getNextOrderNoForType('sale');
+        purchaseOrder.value.orderNo = getNextOrderNoForType('purchase');
+        packingOrder.value.orderNo = getNextOrderNoForType('packing');
+
+        nextTick(updateScale);
+        window.addEventListener('resize', updateScale);
+        window.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') isZoomModalOpen.value = false;
+        });
+      });
+
+      watch([currentTab, activeOrder, packingOrder], () => {
+        nextTick(updateScale);
+      }, { deep: true });
+
+      return {
+        currentTab,
+        saleOrder,
+        purchaseOrder,
+        packingOrder,
+        activeOrder,
+        activeTotalQuantity,
+        activeTotalAmount,
+        packingTotalCtn,
+        packingTotalQty,
+        addItem,
+        removeItem,
+        addPackingItem,
+        removePackingItem,
+        uploadImage,
+        uploadPackingImage,
+        exportImage,
+        copyImage,
+        exportExcel,
+        loading,
+        copying,
+        exportingExcel,
+        previewWrapper,
+        invoiceTargetRef,
+        scaleFactor,
+        targetHeight,
+        switchTab,
+        isZoomModalOpen,
+        showHistoryModal,
+        historyCategory,
+        historyList,
+        filteredHistoryList,
+        getHistoryCount,
+        openHistoryModal,
+        startNextOrder,
+        loadHistoryOrder,
+        deleteHistoryOrder,
+        recalcOrderNo,
+        clearAllHistoryWithPassword,
+        exportStartDate,
+        exportEndDate,
+        batchExporting,
+        batchProgressText,
+        batchExportZip,
+        // 修改模式专属返回属性
+        isEditingHistory,
+        editingOrderNo,
+        lastSavedTime,
+        showSaveSuccessModal,
+        lastSavedOrderNo,
+        saveEditedOrder,
+        exitEditMode,
+        finishEditAndNewOrder,
+        finishEditAndViewHistory
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
